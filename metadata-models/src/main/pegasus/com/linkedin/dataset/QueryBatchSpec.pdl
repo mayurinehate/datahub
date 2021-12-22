@@ -1,0 +1,11 @@
+namespace com.linkedin.dataset
+
+/**
+ * A batch specified by a query.
+ */
+record QueryBatchSpec {
+  /**
+  * A query within the validator system that identifies a batch of data
+  */
+  query: string
+}

@@ -1,0 +1,8 @@
+namespace com.linkedin.dataset
+
+/**
+ * A "batch" indicating the entire table
+ */
+record FullTableBatchSpec {
+  
+}

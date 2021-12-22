@@ -1,0 +1,14 @@
+namespace com.linkedin.dataset
+
+/**
+ * Expectations about a dataset
+ */
+@Aspect = {
+  "name": "datasetExpectations"
+}
+record DatasetExpectations {
+  /**
+   * The constraints on the dataset
+   */
+  constraints: array[Constraint]
+}

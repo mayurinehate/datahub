@@ -1,0 +1,29 @@
+namespace com.linkedin.dataset
+
+import com.linkedin.timeseries.TimeseriesAspectBase
+
+/**
+ * Details of a single run of validating Constraints on a dataset.
+ */
+@Aspect = {
+  "name": "datasetValidationRun",
+  "type": "timeseries",
+}
+record DatasetValidationRun includes TimeseriesAspectBase {
+
+  /**
+  * The system which is evaluating constraints on data 
+  */
+  // e.g. "greatexpectations"
+  constraintValidator: optional string
+
+  /**
+   * A run id as assigned by a validator.
+   */
+  runId: optional string
+
+  /**
+   * Users within this bucket, with frequency counts
+   */
+  validationResults: array[DatasetValidationResults]
+}

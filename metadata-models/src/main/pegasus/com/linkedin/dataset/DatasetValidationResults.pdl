@@ -1,0 +1,32 @@
+namespace com.linkedin.dataset
+
+/**
+ * The results of evaluating a single Constraint, for one batch, within a particular ValidationRun
+ */
+record DatasetValidationResults {
+  /**
+   * The constraint evaluated
+   */
+  constraint: Constraint
+
+  /**
+  *  Runtime parameter values used while evaluating the constraints
+  */
+  evaluationParameters: optional map[string, string]
+
+  /**
+   * Specification of the batch whose data quality is evaluated
+   */
+  batchSpec: DatasetBatchSpec
+
+  /**
+   * The results of evaluation
+   */
+  // Some fixed keys are 
+  // TODO
+
+  // Other keys could exist specific to a constraint or validator.
+  results: map[string, float]
+
+  // TODO add other types of results e.g. indicating which exactly which rows/values were invalid etc.
+}

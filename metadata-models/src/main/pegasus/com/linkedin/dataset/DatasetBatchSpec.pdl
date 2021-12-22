@@ -1,0 +1,18 @@
+namespace com.linkedin.dataset
+
+/**
+ * A batch on which certain operations, e.g. data quality evaluation, is done.
+ */
+record DatasetBatchSpec {
+  /**
+   * The identifier as specified by the system operating on the batch.
+   */
+  batchId: string
+  
+  batchSpecDetails: union[QueryBatchSpec, PartitionBatchSpec, FullTableBatchSpec]
+
+  /**
+  * Any limit to the number of rows in the batch, if applied
+  */
+  limit: optional int  
+}

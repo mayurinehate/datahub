@@ -1,0 +1,9 @@
+namespace com.linkedin.dataset
+
+/**
+ * A batch identified by specifying partitions of interest.
+ */
+record PartitionBatchSpec {
+
+  partitions: array[map[string, string]]
+}

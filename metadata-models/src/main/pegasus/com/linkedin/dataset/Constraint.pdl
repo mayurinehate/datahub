@@ -1,0 +1,34 @@
+namespace com.linkedin.dataset
+
+import com.linkedin.common.Urn
+
+/**
+ * Indicates a constraint that is applied to a dataset
+ */
+record Constraint {
+
+  /**
+  * The system in which the constraints are specified
+  */
+  // e.g. "greatexpectations"
+  constraintProvider: optional string
+
+  // can be a combination of fixed values defined by Datahub, e.g. "column_value_is_not_null" etc.
+  // List of standard values TODO.  
+  // can also be a custom-format where the provider name is prefixed. e.g. "greatexpectations.fooConstraint"
+
+  constraintType: string
+
+  // valid values are "columnValue", "columnAgg", "table"
+  constraintDomain: string
+
+  /**
+   * The field's schema field path. 
+   */
+   
+  // Set iff constraintDomain is "columnValue" or "columnAgg"
+  field: optional Urn
+
+  // TODO value type can actually be number or string, how to specify?  
+  parameters: map[string, string] = {}
+}

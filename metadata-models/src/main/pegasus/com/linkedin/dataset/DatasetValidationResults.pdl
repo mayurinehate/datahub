@@ -20,6 +20,11 @@ record DatasetValidationResults {
   batchSpec: DatasetBatchSpec
 
   /**
+  *  Indicator of whether the constraint is fully satisfied for the batch
+  */
+  success: boolean
+
+  /**
    * The results of evaluation
    */
   // Some fixed keys are 

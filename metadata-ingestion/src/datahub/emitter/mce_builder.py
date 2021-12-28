@@ -42,6 +42,10 @@ def make_dataset_urn(platform: str, name: str, env: str = DEFAULT_ENV) -> str:
     return f"urn:li:dataset:({make_data_platform_urn(platform)},{name},{env})"
 
 
+def make_schema_field_urn(dataset_urn: str, field_name: str) -> str:
+    return f"urn:li:schemaField:({dataset_urn},{field_name})"
+
+
 def dataset_urn_to_key(dataset_urn: str) -> Optional[DatasetKeyClass]:
     pattern = r"urn:li:dataset:\(urn:li:dataPlatform:(.*),(.*),(.*)\)"
     results = re.search(pattern, dataset_urn)

@@ -91,6 +91,7 @@ plugins: Dict[str, Set[str]] = {
     "airflow": {
         "apache-airflow >= 1.10.2",
     },
+    "great-expectations": {"great-expectations>=0.13.40"},
     # Source plugins
     "athena": sql_common | {"PyAthena[SQLAlchemy]"},
     "azure-ad": set(),

@@ -10,11 +10,6 @@ record DatasetValidationResults {
   constraint: Constraint
 
   /**
-  *  Runtime parameter values used while evaluating the constraints
-  */
-  evaluationParameters: optional map[string, string]
-
-  /**
    * Specification of the batch whose data quality is evaluated
    */
   batchSpec: DatasetBatchSpec
@@ -28,10 +23,15 @@ record DatasetValidationResults {
    * The results of evaluation
    */
   // Some fixed keys are 
-  // TODO
+  // "row_count", "unexpected_count", "missing_count", "actual_agg_value"
 
   // Other keys could exist specific to a constraint or validator.
-  results: map[string, float]
+  results: optional map[string, float]
 
   // TODO add other types of results e.g. indicating which exactly which rows/values were invalid etc.
+
+  // OUT OF SCOPE in this model currently:
+  // 1. details of the invalid rows/values
+  // 2. expectation-specific results, if any, as given by a validator
+  // 3. runtime evaluation parameters, if any, as specified within the validator
 }

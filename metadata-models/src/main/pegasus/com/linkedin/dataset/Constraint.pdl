@@ -13,13 +13,14 @@ record Constraint {
   // e.g. "greatexpectations"
   constraintProvider: optional string
 
-  // can be a combination of fixed values defined by Datahub, e.g. "column_value_is_not_null" etc.
+  // can be a combination of fixed values defined by Datahub 
+  // e.g. "column_value_is_not_null", "column_value_is_less_than" etc.
   // List of standard values TODO.  
   // can also be a custom-format where the provider name is prefixed. e.g. "greatexpectations.fooConstraint"
 
   constraintType: string
 
-  // valid values are "columnValue", "columnAgg", "table"
+  // valid values are "columnValue", "columnAgg", "table", "tableDef"
   constraintDomain: string
 
   /**
@@ -29,6 +30,9 @@ record Constraint {
   // Set iff constraintDomain is "columnValue" or "columnAgg"
   field: optional Urn
 
-  // TODO value type can actually be number or string, how to specify?  
-  parameters: map[string, string] = {}
+  /**
+   * The values of parameters required by this constraint. 
+   */
+  // e.g. constraint of type "column_value_is_less_than" would have a parameter "max_value"
+  parameters: map[string, union[int, float, string, array[string]]] = {}
 }

@@ -1,0 +1,54 @@
+name: test_checkpoint
+config_version: 1.0
+template_name:
+module_name: great_expectations.checkpoint
+class_name: Checkpoint
+run_name_template: '%Y%m%d-%H%M%S-my-run-name-template'
+expectation_suite_name: test_suite
+batch_request:
+action_list:
+  - name: store_validation_result
+    action:
+      class_name: StoreValidationResultAction
+  - name: store_evaluation_params
+    action:
+      class_name: StoreEvaluationParametersAction
+  - name: update_data_docs
+    action:
+      class_name: UpdateDataDocsAction
+      site_names: []
+  - name: datahub_action
+    action:
+      module_name: datahub.integrations.great_expectations
+      class_name: DatahubValidationAction
+      server_url: http://localhost:8080
+evaluation_parameters: {}
+runtime_configuration: {}
+validations:
+  - batch_request:
+      datasource_name: my_postgresql_datasource
+      data_connector_name: by_category_random_sample
+      data_asset_name: data__foo1__asset
+  - batch_request:
+      datasource_name: my_postgresql_datasource
+      data_connector_name: whole_table
+      data_asset_name: foo1
+      data_connector_query:
+        index: -1
+  - batch_request:
+      datasource_name: my_postgresql_datasource
+      data_connector_name: by_start_year
+      data_asset_name: foo2
+      data_connector_query:
+        index: -1
+  - batch_request:
+      datasource_name: runtime_postgres_datasource
+      data_connector_name: default_runtime_data_connector_name
+      data_asset_name: custom_data_asset
+      runtime_parameters:
+        query: select * from foo2 limit 2
+      batch_identifiers:
+        default_identifier_name: test_identifier
+profilers: []
+ge_cloud_id:
+expectation_suite_ge_cloud_id:

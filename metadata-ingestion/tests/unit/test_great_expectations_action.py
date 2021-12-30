@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest import mock
 
 from great_expectations.core.batch import Batch, BatchDefinition, RuntimeBatchRequest
@@ -24,7 +24,6 @@ from great_expectations.execution_engine.sqlalchemy_execution_engine import (
     SqlAlchemyExecutionEngine,
 )
 from great_expectations.validator.validator import Validator
-from pytz import UTC
 
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.integrations.great_expectations import DatahubValidationAction
@@ -59,12 +58,12 @@ def test_DatahubValidationAction_basic(tmp_path: str) -> None:
             },
         },
     )
-
     validation_result_suite_id = ValidationResultIdentifier(
         expectation_suite_identifier=ExpectationSuiteIdentifier("asset.default"),
         run_id=RunIdentifier(run_name="test_100"),
         batch_identifier="1234",
     )
+    validator = Validator(execution_engine=PandasExecutionEngine())
 
     server_url = "http://localhost:9999"
 
@@ -87,7 +86,7 @@ def test_DatahubValidationAction_basic(tmp_path: str) -> None:
         datahub_action.run(
             validation_result_suite_identifier=validation_result_suite_id,
             validation_result_suite=validation_result_suite,
-            data_asset=Validator(execution_engine=PandasExecutionEngine()),
+            data_asset=validator,
         )
         == {"datahub_notification_result": "none required"}
     )
@@ -103,16 +102,18 @@ def test_DatahubValidationAction_basic(tmp_path: str) -> None:
             "sampling_kwargs": {"n": 20},
         }
     )
+    validator = Validator(
+        execution_engine=SqlAlchemyExecutionEngine(
+            connection_string="postgresql://localhost:5432/test"
+        )
+    )
+
     # Test without server_url set; expect fail
     assert (
         datahub_action.run(
             validation_result_suite_identifier=validation_result_suite_id,
             validation_result_suite=validation_result_suite,
-            data_asset=Validator(
-                execution_engine=SqlAlchemyExecutionEngine(
-                    connection_string="postgresql://@localhost/test"
-                )
-            ),
+            data_asset=validator,
         )
         == {"datahub_notification_result": "Datahub notification failed"}
     )
@@ -193,11 +194,17 @@ def test_DatahubValidationAction_fulltable(
             ),
         },
     )
+    validator = Validator(
+        execution_engine=SqlAlchemyExecutionEngine(
+            connection_string="postgresql://localhost:5432/test"
+        )
+    )
 
     validation_result_suite_id = ValidationResultIdentifier(
         expectation_suite_identifier=ExpectationSuiteIdentifier("asset.default"),
         run_id=RunIdentifier(
-            run_name="test_100", run_time=datetime.fromtimestamp(1640701702, tz=UTC)
+            run_name="test_100",
+            run_time=datetime.fromtimestamp(1640701702, tz=timezone.utc),
         ),
         batch_identifier="1234",
     )
@@ -212,11 +219,7 @@ def test_DatahubValidationAction_fulltable(
         datahub_action.run(
             validation_result_suite_identifier=validation_result_suite_id,
             validation_result_suite=validation_result_suite,
-            data_asset=Validator(
-                execution_engine=SqlAlchemyExecutionEngine(
-                    connection_string="postgresql://@localhost/test"
-                )
-            ),
+            data_asset=validator,
         )
         == {"datahub_notification_result": "Datahub notification succeeded"}
     )
@@ -231,7 +234,7 @@ def test_DatahubValidationAction_fulltable(
         aspect=DatasetValidationRunClass(
             timestampMillis=1640701702000,
             constraintValidator="great-expectations",
-            runId="2021-12-28 14:28:22+00:00",
+            runId="2021-12-28T14:28:22Z",
             validationResults=[
                 DatasetValidationResultsClass(
                     constraint=ConstraintClass(
@@ -239,8 +242,8 @@ def test_DatahubValidationAction_fulltable(
                         constraintType="expect_table_row_count_to_be_between",
                         constraintDomain="table",
                         parameters={
-                            "max_value": "10000",
-                            "min_value": "10000",
+                            "max_value": 10000,
+                            "min_value": 10000,
                         },
                     ),
                     batchSpec=DatasetBatchSpecClass(
@@ -256,7 +259,7 @@ def test_DatahubValidationAction_fulltable(
                         constraintType="expect_column_values_to_not_be_null",
                         constraintDomain="columnValue",
                         field="urn:li:schemaField:(urn:li:dataset:(urn:li:dataPlatform:postgres,test.public.table_partitioned_by_date_column__A,PROD),date)",
-                        parameters={"column": "date"},
+                        parameters={},
                     ),
                     batchSpec=DatasetBatchSpecClass(
                         batchId="1234",
@@ -276,9 +279,8 @@ def test_DatahubValidationAction_fulltable(
                         constraintDomain="columnAgg",
                         field="urn:li:schemaField:(urn:li:dataset:(urn:li:dataPlatform:postgres,test.public.table_partitioned_by_date_column__A,PROD),passenger_count)",
                         parameters={
-                            "column": "passenger_count",
-                            "max_value": "1.5716",
-                            "min_value": "1.5716",
+                            "max_value": 1.5716,
+                            "min_value": 1.5716,
                         },
                     ),
                     batchSpec=DatasetBatchSpecClass(
@@ -330,7 +332,6 @@ def test_DatahubValidationAction_partitiontable(
             },
             "batch_spec": SqlAlchemyDatasourceBatchSpec(
                 {
-                    "schema_name": "public",
                     "table_name": "table_partitioned_by_date_column__A",
                     "batch_identifiers": {"date": "2021-12-20"},
                     "splitter_method": "_split_on_converted_datetime",
@@ -344,7 +345,11 @@ def test_DatahubValidationAction_partitiontable(
             ),
         },
     )
-
+    validator = Validator(
+        execution_engine=SqlAlchemyExecutionEngine(
+            connection_string="postgresql://localhost:5432/test"
+        )
+    )
     validation_result_suite_id = ValidationResultIdentifier(
         expectation_suite_identifier=ExpectationSuiteIdentifier("asset.default"),
         run_id=RunIdentifier(
@@ -363,11 +368,7 @@ def test_DatahubValidationAction_partitiontable(
         datahub_action.run(
             validation_result_suite_identifier=validation_result_suite_id,
             validation_result_suite=validation_result_suite,
-            data_asset=Validator(
-                execution_engine=SqlAlchemyExecutionEngine(
-                    connection_string="postgresql://@localhost/test"
-                )
-            ),
+            data_asset=validator,
         )
         == {"datahub_notification_result": "Datahub notification succeeded"}
     )
@@ -382,7 +383,7 @@ def test_DatahubValidationAction_partitiontable(
         aspect=DatasetValidationRunClass(
             timestampMillis=1640701702000,
             constraintValidator="great-expectations",
-            runId="2021-12-28 14:28:22+00:00",
+            runId="2021-12-28T14:28:22Z",
             validationResults=[
                 DatasetValidationResultsClass(
                     constraint=ConstraintClass(
@@ -390,8 +391,8 @@ def test_DatahubValidationAction_partitiontable(
                         constraintType="expect_table_row_count_to_be_between",
                         constraintDomain="table",
                         parameters={
-                            "max_value": "10000",
-                            "min_value": "10000",
+                            "max_value": 10000,
+                            "min_value": 10000,
                         },
                     ),
                     batchSpec=DatasetBatchSpecClass(
@@ -460,6 +461,38 @@ def test_DatahubValidationAction_query(
         batch_identifier="8cfd7cf3dd553ffa14546d6e87d73f06",
     )
 
+    validator = Validator(
+        execution_engine=SqlAlchemyExecutionEngine(
+            connection_string="postgresql://localhost:5432/test"
+        ),
+        batches=[
+            Batch(
+                data=[],
+                batch_request=RuntimeBatchRequest(
+                    datasource_name="my_postgres_datasource",
+                    data_connector_name="default_runtime_data_connector_name",
+                    data_asset_name="some-data-asset",
+                    runtime_parameters={
+                        "query": "select * from my_table where col>5",
+                    },
+                    batch_identifiers={"default_identifier_name": "default_identifier"},
+                ),
+                batch_spec=RuntimeQueryBatchSpec(
+                    {
+                        "data_asset_name": "some-data-asset",
+                        "query": "SQLQuery",  # "select * from my_table where col>5",
+                    }
+                ),
+                batch_definition=BatchDefinition(
+                    datasource_name="my_postgres_datasource",
+                    data_connector_name="default_runtime_data_connector_name",
+                    data_asset_name="some-data-asset",
+                    batch_identifiers=IDDict(),
+                ),
+            )
+        ],
+    )
+
     server_url = "http://localhost:9999"
 
     datahub_action = DatahubValidationAction(
@@ -469,39 +502,7 @@ def test_DatahubValidationAction_query(
     x = datahub_action.run(
         validation_result_suite_identifier=validation_result_suite_id,
         validation_result_suite=validation_result_suite,
-        data_asset=Validator(
-            execution_engine=SqlAlchemyExecutionEngine(
-                connection_string="postgresql://@localhost/test"
-            ),
-            batches=[
-                Batch(
-                    data=[],
-                    batch_request=RuntimeBatchRequest(
-                        datasource_name="my_postgres_datasource",
-                        data_connector_name="default_runtime_data_connector_name",
-                        data_asset_name="some-data-asset",
-                        runtime_parameters={
-                            "query": "select * from my_table where col>5",
-                        },
-                        batch_identifiers={
-                            "default_identifier_name": "default_identifier"
-                        },
-                    ),
-                    batch_spec=RuntimeQueryBatchSpec(
-                        {
-                            "data_asset_name": "some-data-asset",
-                            "query": "SQLQuery",  # "select * from my_table where col>5",
-                        }
-                    ),
-                    batch_definition=BatchDefinition(
-                        datasource_name="my_postgres_datasource",
-                        data_connector_name="default_runtime_data_connector_name",
-                        data_asset_name="some-data-asset",
-                        batch_identifiers=IDDict(),
-                    ),
-                )
-            ],
-        ),
+        data_asset=validator,
     )
     assert x == {"datahub_notification_result": "none required"}
 

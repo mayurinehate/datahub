@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict, Optional, Union
+from datetime import timezone
+from typing import Any, Dict, List, Optional, Union
 
 from great_expectations.checkpoint.actions import ValidationAction
 from great_expectations.core.batch import Batch
@@ -25,22 +26,20 @@ from sqlalchemy.engine.url import make_url
 import datahub.emitter.mce_builder as builder
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.rest_emitter import DatahubRestEmitter
-from datahub.metadata.schema_classes import (
-    ChangeTypeClass,
-    ConstraintClass,
-    DatasetBatchSpecClass,
-    DatasetValidationResultsClass,
-    DatasetValidationRunClass,
-    FullTableBatchSpecClass,
-    PartitionBatchSpecClass,
-    QueryBatchSpecClass,
+from datahub.metadata.com.linkedin.pegasus2avro.dataset import (
+    Constraint,
+    DatasetBatchSpec,
+    DatasetValidationResults,
+    DatasetValidationRun,
+    FullTableBatchSpec,
+    PartitionBatchSpec,
+    QueryBatchSpec,
 )
+from datahub.metadata.com.linkedin.pegasus2avro.events.metadata import ChangeType
 
 logger = logging.getLogger(__name__)
 
 
-# TODO - long warnings for the cases that will not work,
-# Add try except block/graceful handling, wherever possibility of exception
 class DatahubValidationAction(ValidationAction):
     def __init__(
         self,
@@ -83,16 +82,11 @@ class DatahubValidationAction(ValidationAction):
             url_instance = make_url(execution_engine.engine.url)
             data_platform = url_instance.drivername
 
-            # Handle other data platform mapping here, if needed
-            # postgresql->postgres, postgresql+psycopg2->postgres
-            if "postgres" in data_platform:
-                data_platform = "postgres"
-
             if validation_result_suite.meta is not None:
                 batch_spec = validation_result_suite.meta.get("batch_spec")
-            if isinstance(batch_spec, SqlAlchemyDatasourceBatchSpec) and (
-                ("type" in batch_spec and batch_spec["type"] == "table")
-                or ("table_name" in batch_spec)
+            if (
+                isinstance(batch_spec, SqlAlchemyDatasourceBatchSpec)
+                and "table_name" in batch_spec
             ):
                 # e.g. ConfiguredAssetSqlDataConnector with splitter_method or sampling_method
                 schema_name = (
@@ -112,14 +106,16 @@ class DatahubValidationAction(ValidationAction):
                     and batch_spec.get("splitter_method") != "_split_on_whole_table"
                 ):
                     batch_identifiers = batch_spec.get("batch_identifiers", {})
+                    # String representation of partition values is used, as datahub model
+                    # allows only strings i batch_identifiers
                     batch_identifiers = {
                         k: str(v) for k, v in batch_identifiers.items()
                     }
-                    batchSpecDetails = PartitionBatchSpecClass(
+                    batchSpecDetails = PartitionBatchSpec(
                         [batch_identifiers]
                     )  # type:ignore
                 else:
-                    batchSpecDetails = FullTableBatchSpecClass()  # type:ignore
+                    batchSpecDetails = FullTableBatchSpec()  # type:ignore
             elif (
                 isinstance(batch_spec, RuntimeQueryBatchSpec)
                 and "query" in batch_spec
@@ -129,9 +125,10 @@ class DatahubValidationAction(ValidationAction):
                 query = data_asset.batches[batch_id].batch_request.runtime_parameters[
                     "query"
                 ]
-                batchSpecDetails = QueryBatchSpecClass(query=query)  # type:ignore
+                batchSpecDetails = QueryBatchSpec(query=query)  # type:ignore
                 logger.warning(
-                    "DatahubValidationAction does not support RuntimeQueryBatchSpec yet"
+                    "DatahubValidationAction does not support RuntimeQueryBatchSpec yet. \
+                        No metadata will be reported."
                 )
             else:
                 logger.warning(
@@ -139,6 +136,7 @@ class DatahubValidationAction(ValidationAction):
                         No metadata will be reported."
                 )
         else:
+            # TODO - v2-spec - SqlAlchemyDataset support
             logger.warning(
                 f"DatahubValidationAction does not recognize this GE data asset - {type(data_asset)}. \
                     This is either using v2-api or execution engine other than sqlalchemy. \
@@ -146,12 +144,7 @@ class DatahubValidationAction(ValidationAction):
             )
 
         if dataset_urn is None or batchSpecDetails is None:
-            logger.warning(
-                "Something went wrong. No metadata will be reported to datahub."
-            )
             return {"datahub_notification_result": "none required"}
-
-        run_time = validation_result_suite_identifier.run_id.run_time
 
         validation_results = []
         for result in validation_result_suite.results:
@@ -159,34 +152,58 @@ class DatahubValidationAction(ValidationAction):
             success = True if result["success"] else False
             expectation_type = expectation_config["expectation_type"]
             kwargs = expectation_config["kwargs"]
-            kwargs = {k: str(v) for k, v in kwargs.items() if k != "batch_id"}
 
             result = result["result"]
-            result = {
-                k: v
-                for k, v in result.items()
-                if isinstance(v, int) or isinstance(v, float)
-            }
-            field: Optional[str]
+
+            field: Optional[str] = None
             if "column" in kwargs and "observed_value" in result:
                 field = builder.make_schema_field_urn(dataset_urn, kwargs["column"])
                 constraintDomain = "columnAgg"
             elif "column" in kwargs and "unexpected_count" in result:
                 field = builder.make_schema_field_urn(dataset_urn, kwargs["column"])
                 constraintDomain = "columnValue"
+            elif expectation_type in [
+                "expect_column_to_exist",
+                "expect_table_columns_to_match_ordered_list",
+                "expect_table_columns_to_match_set",
+                "expect_table_column_count_to_be_between",
+                "expect_table_column_count_to_equal",
+            ]:
+                constraintDomain = "tableDef"
             else:
-                field = None
                 constraintDomain = "table"
+
+            result = {
+                k: v
+                for k, v in result.items()
+                if isinstance(v, int) or isinstance(v, float)
+            }
+
+            kwargs_new: Dict[str, Union[int, float, str, List[str]]] = {
+                k: v
+                for k, v in kwargs.items()
+                if isinstance(v, (int, float, str)) and k not in ["batch_id", "column"]
+            }
+            # String representation of list values is used, as datahub model
+            # allows list of strings only in constraint parameter's value
+            kwargs_new.update(
+                {
+                    k: [str(i) for i in v]
+                    for k, v in kwargs.items()
+                    if isinstance(v, (list))
+                }
+            )
+
             validation_results.append(
-                DatasetValidationResultsClass(
-                    constraint=ConstraintClass(
+                DatasetValidationResults(
+                    constraint=Constraint(
                         constraintProvider="great-expectations",
                         constraintDomain=constraintDomain,
                         constraintType=expectation_type,
-                        parameters=kwargs,
+                        parameters=kwargs_new,
                         field=field,
                     ),
-                    batchSpec=DatasetBatchSpecClass(
+                    batchSpec=DatasetBatchSpec(
                         batchId=batch_id, batchSpecDetails=batchSpecDetails, limit=limit
                     ),
                     results=result,
@@ -194,17 +211,20 @@ class DatahubValidationAction(ValidationAction):
                 )
             )
 
-        # We need to actually emit appropriate data quality aspect/entity
+        run_time = validation_result_suite_identifier.run_id.run_time.astimezone(
+            timezone.utc
+        )
+
         mcpw = MetadataChangeProposalWrapper(
-            changeType=ChangeTypeClass.UPSERT,
+            changeType=ChangeType.UPSERT,
             entityType="dataset",
             entityUrn=dataset_urn,
             aspectName="datasetValidationRun",
-            aspect=DatasetValidationRunClass(
+            aspect=DatasetValidationRun(
                 timestampMillis=int(run_time.timestamp() * 1000),
                 constraintValidator="great-expectations",
                 validationResults=validation_results,
-                runId=str(run_time),
+                runId=run_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             ),
         )
 
@@ -232,25 +252,50 @@ class DatahubValidationAction(ValidationAction):
 
 def make_dataset_urn(data_platform, schema_name, table_name, url_instance):
 
-    if data_platform in ["postgres", "mssql", "trino"]:
-        if schema_name is None or url_instance.database is None:
+    # Handle other data platform mapping here, if needed
+    # postgresql->postgres, postgresql+psycopg2->postgres
+    if "postgres" in data_platform:
+        data_platform = "postgres"
+    elif "mssql" in data_platform:
+        data_platform = "mssql"
+    elif "mysql" in data_platform:
+        data_platform = "mysql"
+
+    if data_platform == "postgres":
+        schema_name = schema_name if schema_name else "public"
+        database_name = url_instance.database if url_instance.database else "postgres"
+        schema_name = "{}.{}".format(database_name, schema_name)
+    elif data_platform == "mssql":
+        schema_name = schema_name if schema_name else "dbo"
+        if url_instance.database is None:
             logger.warning(
-                f"Failed to locate schema name and database name for {data_platform}"
+                f"DatahubValidationAction failed to locate database name for {data_platform}. \
+                    No metadata will be reported."
             )
             return None
-        # TODO - default schema name handling
+        schema_name = "{}.{}".format(url_instance.database, schema_name)
+    elif data_platform == "trino":
+        if schema_name is None or url_instance.database is None:
+            logger.warning(
+                f"DatahubValidationAction failed to locate schema name and/or database name \
+                    for {data_platform}. No metadata will be reported."
+            )
+            return None
         schema_name = "{}.{}".format(url_instance.database, schema_name)
     elif data_platform == "bigquery":
         if url_instance.host is None or url_instance.database is None:
             logger.warning(
-                f"Failed to locate host and database name for {data_platform}"
+                f"DatahubValidationAction failed to locate host and/or database name for \
+                    {data_platform}. No metadata will be reported."
             )
             return None
         schema_name = "{}.{}".format(url_instance.host, url_instance.database)
 
     schema_name = schema_name if schema_name else url_instance.database
     if schema_name is None:
-        logger.warning(f"Failed to locate schema name for {data_platform}")
+        logger.warning(
+            f"DatahubValidationAction failed to locate schema name for {data_platform}. No metadata will be reported."
+        )
         return None
 
     dataset_name = "{}.{}".format(schema_name, table_name)

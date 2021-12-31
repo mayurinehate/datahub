@@ -18,7 +18,7 @@ FROZEN_TIME = "2021-12-28 12:00:00"
 class MockDatahubEmitter:
     def __init__(
         self,
-        gms_server: Optional[str] = None,
+        gms_server: str,
         token: Optional[str] = None,
         connect_timeout_sec: Optional[float] = None,
         read_timeout_sec: Optional[float] = None,
@@ -51,12 +51,12 @@ def test_ge_ingest(docker_compose_runner, pytestconfig, tmp_path, mock_time, **k
     with docker_compose_runner(
         test_resources_dir / "docker-compose.yml", "great-expectations"
     ) as docker_services, mock.patch(
-        "datahub.emitter.rest_emitter.DatahubRestEmitter"
-    ) as mock_emitter:
+        "datahub.emitter.rest_emitter.DatahubRestEmitter.emit_mcp"
+    ) as mock_emit_mcp:
         wait_for_port(docker_services, "ge_postgres", 5432)
 
         emitter = MockDatahubEmitter("")
-        mock_emitter.return_value = emitter
+        mock_emit_mcp.side_effect = emitter.emit_mcp
 
         shutil.copytree(
             test_resources_dir / "setup/great_expectations",
@@ -67,7 +67,6 @@ def test_ge_ingest(docker_compose_runner, pytestconfig, tmp_path, mock_time, **k
 
         emitter.write_to_file(tmp_path / "ge_mcps.json")
 
-        # import pdb; pdb.set_trace()
         mce_helpers.check_golden_file(
             pytestconfig,
             output_path=tmp_path / "ge_mcps.json",

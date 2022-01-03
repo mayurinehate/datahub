@@ -1,7 +1,7 @@
 import json
 import pathlib
 import shutil
-from typing import Dict, List, Optional
+from typing import List
 from unittest import mock
 
 import great_expectations as ge
@@ -16,15 +16,7 @@ FROZEN_TIME = "2021-12-28 12:00:00"
 
 
 class MockDatahubEmitter:
-    def __init__(
-        self,
-        gms_server: str,
-        token: Optional[str] = None,
-        connect_timeout_sec: Optional[float] = None,
-        read_timeout_sec: Optional[float] = None,
-        extra_headers: Optional[Dict[str, str]] = None,
-        ca_certificate_path: Optional[str] = None,
-    ):
+    def __init__(self, gms_server: str):
         self.mcps: List[MetadataChangeProposalWrapper] = []
 
     def emit_mcp(self, mcp: MetadataChangeProposalWrapper) -> None:

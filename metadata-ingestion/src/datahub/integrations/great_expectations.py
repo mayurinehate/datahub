@@ -1,3 +1,4 @@
+import datetime
 import logging
 from datetime import timezone
 from typing import Any, Dict, List, Optional, Union
@@ -221,13 +222,25 @@ class DatahubValidationAction(ValidationAction):
                 timezone.utc
             )
 
+            validation_time = validation_result_suite.meta.get(
+                "validation_time",
+                datetime.datetime.now(datetime.timezone.utc).strftime(
+                    "%Y%m%dT%H%M%S.%fZ"
+                ),
+            )
+
             mcpw = MetadataChangeProposalWrapper(
                 changeType=ChangeType.UPSERT,
                 entityType="dataset",
                 entityUrn=dataset_urn,
                 aspectName="datasetValidationRun",
                 aspect=DatasetValidationRun(
-                    timestampMillis=int(run_time.timestamp() * 1000),
+                    timestampMillis=int(
+                        datetime.datetime.strptime(
+                            validation_time, "%Y%m%dT%H%M%S.%fZ"
+                        ).timestamp()
+                        * 1000
+                    ),
                     constraintValidator="great-expectations",
                     validationResults=validation_results,
                     runId=run_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -268,11 +281,20 @@ def make_dataset_urn(data_platform, schema_name, table_name, url_instance, env):
         data_platform = "mssql"
     elif "mysql" in data_platform:
         data_platform = "mysql"
+    elif "redshift" in data_platform:
+        data_platform = "redshift"
+    elif "athena" in data_platform:
+        data_platform = "athena"
 
-    if data_platform == "postgres":
+    if data_platform in ["redshift", "postgres"]:
         schema_name = schema_name if schema_name else "public"
-        database_name = url_instance.database if url_instance.database else "postgres"
-        schema_name = "{}.{}".format(database_name, schema_name)
+        if url_instance.database is None:
+            logger.warning(
+                f"DatahubValidationAction failed to locate database name for {data_platform}. \
+                    No metadata will be reported."
+            )
+            return None
+        schema_name = "{}.{}".format(url_instance.database, schema_name)
     elif data_platform == "mssql":
         schema_name = schema_name if schema_name else "dbo"
         if url_instance.database is None:
@@ -282,7 +304,7 @@ def make_dataset_urn(data_platform, schema_name, table_name, url_instance, env):
             )
             return None
         schema_name = "{}.{}".format(url_instance.database, schema_name)
-    elif data_platform == "trino":
+    elif data_platform in ["trino","snowflake"]:
         if schema_name is None or url_instance.database is None:
             logger.warning(
                 f"DatahubValidationAction failed to locate schema name and/or database name \

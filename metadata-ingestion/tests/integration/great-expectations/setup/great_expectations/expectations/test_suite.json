@@ -18,8 +18,8 @@
       },
       "expectation_type": "expect_table_row_count_to_be_between",
       "kwargs": {
-        "max_value": 1,
-        "min_value": 5
+        "max_value": 5,
+        "min_value": 1
       },
       "meta": {}
     },
@@ -30,7 +30,7 @@
       "expectation_type": "expect_column_min_to_be_between",
       "kwargs": {
         "column": "id",
-        "max_value": 1,
+        "max_value": 5,
         "min_value": 1
       },
       "meta": {}

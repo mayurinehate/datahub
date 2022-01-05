@@ -94,7 +94,7 @@ plugins: Dict[str, Set[str]] = {
     },
     "great-expectations": {
         "sqlalchemy",        
-        "great-expectations",
+        "great-expectations>=0.13",
     },
     # Source plugins
     "athena": sql_common | {"PyAthena[SQLAlchemy]"},

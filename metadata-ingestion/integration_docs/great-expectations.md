@@ -1,6 +1,6 @@
 # Data Quality with Great Expectations
 
-This guide helps to setup and configure `DatahubValidationAction` in Great Expectations to send validation run details to Datahub using Datahub's Rest emitter.
+This guide helps to setup and configure `DatahubValidationAction` in Great Expectations to send validation run details to Datahub using Datahub's Python Rest emitter.
 
 
 ## Capabilities

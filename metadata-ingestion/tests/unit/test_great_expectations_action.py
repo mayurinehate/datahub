@@ -181,6 +181,7 @@ def test_DatahubValidationAction_fulltable(
             "run_id": {
                 "run_name": "test_100",
             },
+            "validation_time": "20211228T120000.000000Z",
             "batch_spec": SqlAlchemyDatasourceBatchSpec(
                 {
                     "schema_name": "public",
@@ -232,7 +233,7 @@ def test_DatahubValidationAction_fulltable(
         auditHeader=None,
         aspectName="datasetValidationRun",
         aspect=DatasetValidationRunClass(
-            timestampMillis=1640701702000,
+            timestampMillis=1640673000000,
             constraintValidator="great-expectations",
             runId="2021-12-28T14:28:22Z",
             validationResults=[
@@ -330,6 +331,7 @@ def test_DatahubValidationAction_partitiontable(
             "run_id": {
                 "run_name": "test_100",
             },
+            "validation_time": "20211228T120000.000000Z",
             "batch_spec": SqlAlchemyDatasourceBatchSpec(
                 {
                     "table_name": "table_partitioned_by_date_column__A",
@@ -381,7 +383,7 @@ def test_DatahubValidationAction_partitiontable(
         auditHeader=None,
         aspectName="datasetValidationRun",
         aspect=DatasetValidationRunClass(
-            timestampMillis=1640701702000,
+            timestampMillis=1640673000000,
             constraintValidator="great-expectations",
             runId="2021-12-28T14:28:22Z",
             validationResults=[
@@ -444,6 +446,7 @@ def test_DatahubValidationAction_query(
             "run_id": {
                 "run_name": "test_100",
             },
+            "validation_time": "20211228T120000.000000Z",
             "batch_spec": RuntimeQueryBatchSpec(
                 {
                     "data_asset_name": "some-data-asset",

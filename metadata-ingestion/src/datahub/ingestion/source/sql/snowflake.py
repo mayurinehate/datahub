@@ -1,6 +1,7 @@
 import json
 import logging
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import pydantic
@@ -28,6 +29,7 @@ from datahub.ingestion.api.workunit import MetadataWorkUnit
 from datahub.ingestion.source.aws.s3_util import make_s3_urn
 from datahub.ingestion.source.sql.sql_common import (
     RecordTypeClass,
+    SQLAlchemyConfig,
     SQLAlchemySource,
     SqlWorkUnit,
     TimeTypeClass,
@@ -68,6 +70,8 @@ class SnowflakeSource(SQLAlchemySource):
         super().__init__(config, ctx, "snowflake")
         self._lineage_map: Optional[Dict[str, List[Tuple[str, str, str]]]] = None
         self._external_lineage_map: Optional[Dict[str, Set[str]]] = None
+        self._profile_candidates: Optional[Dict[str, List[str]]] = None
+
         self.report: SnowflakeReport = SnowflakeReport()
         self.config: SnowflakeConfig = config
         self.provision_role_in_progress: bool = False
@@ -170,8 +174,12 @@ class SnowflakeSource(SQLAlchemySource):
             else:
                 self.report.report_dropped(db)
 
-    def get_identifier(self, *, schema: str, entity: str, **kwargs: Any) -> str:
-        regular = super().get_identifier(schema=schema, entity=entity, **kwargs)
+    def get_identifier(
+        self, *, schema: str, entity: str, inspector: Inspector, **kwargs: Any
+    ) -> str:
+        regular = super().get_identifier(
+            schema=schema, entity=entity, inspector=inspector, **kwargs
+        )
         return f"{self.current_database.lower()}.{regular}"
 
     def _populate_view_upstream_lineage(self, engine: sqlalchemy.engine.Engine) -> None:
@@ -741,8 +749,70 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY downstream_table_name, upstream_table_na
             return False
         return True
 
+    def generate_profile_candidates(
+        self, sql_config: SQLAlchemyConfig, inspector: Inspector
+    ) -> None:
+
+        if self._profile_candidates is None:
+            self._profile_candidates = dict()
+
+        db_name = self.current_database
+
+        if self._profile_candidates.get(db_name) is None:
+            self._profile_candidates[db_name] = []
+
+        threshold_time: datetime = datetime.now(timezone.utc) - timedelta(
+            sql_config.profiling.profile_if_updated_since_days  # type:ignore
+        )
+
+        db_rows = inspector.engine.execute(
+            text(
+                """ SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE LAST_ALTERED >= '{date}' AND TABLE_TYPE= 'BASE TABLE'""".format(
+                    date=datetime.strftime(threshold_time, "%Y-%m-%d %H:%M:%S.%f %z")
+                )
+            )
+        )
+
+        for db_row in db_rows:
+            self._profile_candidates[db_name].append(
+                self.get_identifier(
+                    schema=db_row.table_schema,
+                    entity=db_row.table_name,
+                    inspector=inspector,
+                ).lower()
+            )
+
+        logger.debug(f"Generating profiling candidates for db {db_name}")
+
+    def is_dataset_eligible_for_profiling(
+        self, dataset_name: str, sql_config: SQLAlchemyConfig, inspector: Inspector
+    ) -> bool:
+        """
+        Method overrides default profiling filter which checks profiling eligibility based on allow-deny pattern.
+        This one also don't profile those tables which have not been updated since last N days.
+        """
+        if not super().is_dataset_eligible_for_profiling(
+            dataset_name, sql_config, inspector
+        ):
+            return False
+
+        db_name = self.current_database
+
+        if sql_config.profiling.profile_if_updated_since_days is not None:
+            if (
+                self._profile_candidates is None
+                or self._profile_candidates.get(db_name) is None
+            ):
+                self.generate_profile_candidates(sql_config, inspector)
+            if dataset_name not in self._profile_candidates[db_name]:  # type:ignore
+                return False
+
+        return True
+
     # Stateful Ingestion specific overrides
     # NOTE: There is no special state associated with this source yet than what is provided by sql_common.
+
     def get_platform_instance_id(self) -> str:
         """Overrides the source identifier for stateful ingestion."""
         return self.config.get_account()

@@ -1179,10 +1179,19 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         try:
             # SQLALchemy stubs are incomplete and missing this method.
             # PR: https://github.com/dropbox/sqlalchemy-stubs/pull/223.
-            view_info: dict = inspector.get_table_comment(view, schema)  # type: ignore
+            view_info: dict = inspector.get_table_comment(view, str(schema))  # type: ignore
         except NotImplementedError:
             description: Optional[str] = None
             properties: Dict[str, str] = {}
+        except ProgrammingError as pe:
+            # Snowflake needs schema names quoted when fetching table comments.
+            logger.debug(
+                f"Encountered ProgrammingError. Retrying with quoted schema name for schema {schema} and view {view}",
+                pe,
+            )
+            description = None
+            properties = {}
+            view_info: dict = inspector.get_table_comment(view, f'"{schema}"')  # type: ignore
         else:
             description = view_info["text"]
 
@@ -1303,7 +1312,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
 
     # Override if you want to do additional checks
     def is_dataset_eligible_for_profiling(
-        self, dataset_name: str, sql_config: SQLAlchemyConfig
+        self, dataset_name: str, sql_config: SQLAlchemyConfig, inspector: Inspector
     ) -> bool:
         return sql_config.table_pattern.allowed(
             dataset_name
@@ -1326,7 +1335,9 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             dataset_name = self.get_identifier(
                 schema=schema, entity=table, inspector=inspector
             )
-            if not self.is_dataset_eligible_for_profiling(dataset_name, sql_config):
+            if not self.is_dataset_eligible_for_profiling(
+                dataset_name, sql_config, inspector
+            ):
                 if self.config.profiling.report_dropped_profiles:
                     self.report.report_dropped(f"profile of {dataset_name}")
                 continue

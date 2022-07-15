@@ -22,19 +22,27 @@ services:
       - bash
       - -c
       - |
-        echo "Installing Connector"
+        echo "Installing kafka-connect-jdbc Connector"
         #
         confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.2.5      
         #
+        echo "Installing connect-transforms Connector"
+        #
         confluent-hub install --no-prompt confluentinc/connect-transforms:1.4.1
+        #
+        echo "Installing debezium-connector-mysql Connector"
         #
         confluent-hub install --no-prompt debezium/debezium-connector-mysql:1.7.0
         #
         #confluent-hub install --no-prompt wepay/kafka-connect-bigquery:1.6.8
         #
+        echo "Downloading mysql jar for jdbc connector"
+        #
         curl -k -SL "https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-java-8.0.27.tar.gz" \
              | tar -xzf - -C /usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc/lib \
              --strip-components=1 mysql-connector-java-8.0.27/mysql-connector-java-8.0.27.jar
+        #
+        echo "Installing env var config provider"
         #
         curl -k -SL "https://repo1.maven.org/maven2/io/strimzi/kafka-env-var-config-provider/0.1.1/kafka-env-var-config-provider-0.1.1.tar.gz" \
              | tar -xzf - -C /usr/share/confluent-hub-components/

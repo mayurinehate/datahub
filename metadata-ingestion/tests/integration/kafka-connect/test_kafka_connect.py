@@ -1,3 +1,4 @@
+import logging
 import subprocess
 import time
 
@@ -10,6 +11,7 @@ from tests.test_helpers.click_helpers import run_datahub_cmd
 from tests.test_helpers.docker_helpers import wait_for_port
 
 FROZEN_TIME = "2021-10-25 13:00:00"
+logger = logging.getLogger(__name__)
 
 
 def is_mysql_up(container_name: str, port: int) -> bool:
@@ -40,11 +42,13 @@ def test_kafka_connect_ingest(docker_compose_runner, pytestconfig, tmp_path, moc
             docker_services,
             "test_mysql",
             3306,
-            timeout=120,
+            timeout=200,
             checker=lambda: is_mysql_up("test_mysql", 3306),
         )
+        logger.info("MySQL is Up")
         wait_for_port(docker_services, "test_broker", 59092, timeout=120)
-        wait_for_port(docker_services, "test_connect", 58083, timeout=120)
+        logger.info("Broker is Up")
+        wait_for_port(docker_services, "test_connect", 58083, timeout=200)
         docker_services.wait_until_responsive(
             timeout=30,
             pause=1,
@@ -53,6 +57,7 @@ def test_kafka_connect_ingest(docker_compose_runner, pytestconfig, tmp_path, moc
             ).status_code
             == 200,
         )
+        logger.info("Connect is Up")
         # Creating MySQL source with no transformations , only topic prefix
         r = requests.post(
             "http://localhost:58083/connectors",
@@ -215,8 +220,11 @@ def test_kafka_connect_ingest(docker_compose_runner, pytestconfig, tmp_path, moc
                 }""",
         )
         assert r.status_code == 201  # Created
+
+        logger.info("Connectors created. Waiting for some time")
+
         # Give time for connectors to process the table data
-        time.sleep(60)
+        time.sleep(90)
 
         # Run the metadata ingestion pipeline.
         config_file = (test_resources_dir / "kafka_connect_to_file.yml").resolve()

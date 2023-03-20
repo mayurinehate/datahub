@@ -89,14 +89,12 @@ class BigqueryTableIdentifier:
             table_name:
                 table name (in form <table-id> or <table-prefix>_<shard>`, optionally prefixed with <project-id>.<dataset-id>)
                 See https://cloud.google.com/bigquery/docs/reference/standard-sql/wildcard-table-reference
-                If table_name is fully qualified, i.e. prefixed with <project-id>.<dataset-id> then the special case of
-                dataset as a sharded table, i.e. table-id itself as shard can not be detected.
         Returns:
             (table_name_without_shard, shard):
                 In case of non-sharded tables, returns (<table-id>, None)
                 In case of sharded tables, returns (<table-prefix>, shard)
         """
-        match = re.match(
+        match = re.search(
             BigqueryTableIdentifier._BIGQUERY_DEFAULT_SHARDED_TABLE_REGEX,
             table_name,
             re.IGNORECASE,

@@ -90,6 +90,9 @@ from datahub.ingestion.source.sql.sql_utils import (
     get_dataplatform_instance_aspect,
     get_domain_wu,
 )
+from datahub.ingestion.source.state.classification_state_handler import (
+    ClassificationStateHandler,
+)
 from datahub.ingestion.source.state.profiling_state_handler import ProfilingHandler
 from datahub.ingestion.source.state.redundant_run_skip_handler import (
     RedundantRunSkipHandler,
@@ -270,15 +273,31 @@ class SnowflakeV2Source(
                 run_id=self.ctx.run_id,
             )
 
+        self.profiler: Optional[SnowflakeProfiler] = None
         if config.profiling.enabled:
             # For profiling
             self.profiler = SnowflakeProfiler(
                 config, self.report, self.profiling_state_handler
             )
 
+        self.classification_handler: Optional[ClassificationHandler] = None
         if self.config.classification.enabled:
+            classification_state_handler: Optional[ClassificationStateHandler] = None
+            if (
+                self.config.stateful_classification
+                and self.config.stateful_classification.enabled
+            ):
+                classification_state_handler = ClassificationStateHandler(
+                    source=self,
+                    config=self.config,
+                    pipeline_name=self.ctx.pipeline_name,
+                    run_id=self.ctx.run_id,
+                )
             self.classification_handler = ClassificationHandler(
-                self.config, self.report
+                self.config.classification,
+                self.report,
+                classification_state_handler,
+                self.config.stateful_classification,
             )
 
         # Caches tables for a single database. Consider moving to disk or S3 when possible.
@@ -689,7 +708,7 @@ class SnowflakeV2Source(
         for snowflake_schema in snowflake_db.schemas:
             yield from self._process_schema(snowflake_schema, db_name)
 
-        if self.config.profiling.enabled and self.db_tables:
+        if self.config.profiling.enabled and self.profiler and self.db_tables:
             yield from self.profiler.get_workunits(snowflake_db, self.db_tables)
 
     def fetch_schemas_for_database(self, snowflake_db, db_name):
@@ -854,15 +873,17 @@ class SnowflakeV2Source(
         yield from self.gen_dataset_workunits(table, schema_name, db_name)
 
     def fetch_sample_data_for_classification(
-        self, table, schema_name, db_name, dataset_name
-    ):
+        self, table: SnowflakeTable, schema_name: str, db_name: str, dataset_name: str
+    ) -> None:
         if (
             table.columns
-            and self.config.classification.enabled
+            and self.classification_handler
             and self.classification_handler.is_classification_enabled_for_table(
                 dataset_name
             )
         ):
+            # FIXME: Do not fetch sample values if classification will be skipped as part of stateful classification
+            # Or if "Values" are not used during classification. Implement condition hook in ClassificationHandler
             try:
                 table.sample_data = self.get_sample_values_for_table(
                     table.name, schema_name, db_name
@@ -1205,7 +1226,7 @@ class SnowflakeV2Source(
     def classify_snowflake_table(self, table, dataset_name, schema_metadata):
         if (
             isinstance(table, SnowflakeTable)
-            and self.config.classification.enabled
+            and self.classification_handler
             and self.classification_handler.is_classification_enabled_for_table(
                 dataset_name
             )
@@ -1222,6 +1243,8 @@ class SnowflakeV2Source(
                     table.sample_data.to_dict(orient="list")
                     if table.sample_data is not None
                     else {},
+                    self.gen_dataset_urn(dataset_name),
+                    table.last_altered,
                 )
             except Exception as e:
                 logger.debug(

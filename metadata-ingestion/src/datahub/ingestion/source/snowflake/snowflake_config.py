@@ -12,6 +12,7 @@ from datahub.ingestion.glossary.classification_mixin import (
     ClassificationSourceConfigMixin,
 )
 from datahub.ingestion.source.state.stateful_ingestion_base import (
+    StatefulClassificationConfigMixin,
     StatefulProfilingConfigMixin,
     StatefulUsageConfigMixin,
 )
@@ -48,6 +49,7 @@ class SnowflakeV2Config(
     StatefulUsageConfigMixin,
     StatefulProfilingConfigMixin,
     ClassificationSourceConfigMixin,
+    StatefulClassificationConfigMixin,
 ):
     convert_urns_to_lowercase: bool = Field(
         default=True,

@@ -152,6 +152,45 @@ class StatefulUsageConfigMixin(BaseTimeWindowConfig):
         return values
 
 
+class StatefulClassificationConfig(ConfigModel):
+    enabled: bool = pydantic.Field(
+        default=False,
+        description="Enable stateful classification."
+        " This will store last classification timestamps for all tables "
+        "and will re-attempt classification only if specific conditions are met. ",
+    )
+
+    repeat_after_x_days: pydantic.PositiveInt = pydantic.Field(
+        default=30,
+        description="Number of days to wait before re-attempting classification."
+        " Set to `None`(python) or `null`(yml) to disable re-attempt based on staleness.",
+    )
+
+    repeat_after_table_update: Optional[bool] = pydantic.Field(
+        default=True,
+        description="Whether to re-attempt classification if table has been updated."
+        " Set to `False` to disable re-attempt based on table update..",
+    )
+
+
+class StatefulClassificationConfigMixin(ConfigModel):
+    stateful_classification: Optional[StatefulClassificationConfig]
+
+    @pydantic.root_validator(pre=False)
+    def classification_stateful_option_validator(cls, values: Dict) -> Dict:
+        sti: Optional[StatefulIngestionConfig] = values.get("stateful_ingestion")
+        stc: Optional[StatefulClassificationConfig] = values.get(
+            "stateful_classification"
+        )
+        if sti is None or not sti.enabled:
+            if stc is not None and stc.enabled:
+                logger.warning(
+                    "Stateful ingestion is disabled, disabling `stateful_classification.enabled` config option as well"
+                )
+                stc.enabled = False
+        return values
+
+
 @dataclass
 class StatefulIngestionReport(SourceReport):
     pass

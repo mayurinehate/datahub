@@ -1,4 +1,3 @@
-import os
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -38,8 +37,10 @@ class ClassificationConfig(ConfigModel):
     )
 
     max_workers: int = Field(
-        default=(os.cpu_count() or 4),
-        description="Number of worker threads to use for classification. Set to 1 to disable.",
+        default=1,
+        description="Number of worker threads to use for classification. "
+        "To enable parallelisation, set to a value between 1 and  number of cpu cores. "
+        "Set to value 1 to disable parallelisation. ",
     )
 
     table_pattern: AllowDenyPattern = Field(

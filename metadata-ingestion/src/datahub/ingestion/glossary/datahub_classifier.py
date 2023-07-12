@@ -89,7 +89,20 @@ class DataHubClassifierConfig(ConfigModel):
         description="The confidence threshold above which the prediction is considered as a proposal",
     )
     info_types: Optional[List[str]] = Field(
-        default=None,
+        default=[
+            "Vehicle_Identification_Number",
+            "Credit_Debit_Card_Number",
+            "US_Driving_License_Number",
+            "Swift_Code",
+            "US_Social_Security_Number",
+            "IP_Address_v4",
+            "Age",
+            "IP_Address_v6",
+            "IBAN",
+            "Phone_Number",
+            "Email_Address",
+            "Gender",
+        ],
         description="List of infotypes to be predicted. By default, all supported infotypes are considered, along with any custom infotypes configured in `info_types_config`.",
     )
     info_types_config: Dict[str, InfoTypeConfig] = Field(

@@ -50,8 +50,6 @@ DataHub Classifier is the default classifier implementation, which uses [acryl-d
 - `Gender`
 - `Credit_Debit_Card_Number`
 - `Phone_Number`
-- `Street_Address`
-- `Full_Name`
 - `Age`
 - `IBAN`
 - `US_Social_Security_Number`
@@ -60,6 +58,12 @@ DataHub Classifier is the default classifier implementation, which uses [acryl-d
 - `IP_Address_v6`
 - `US_Driving_License_Number`
 - `Swift_Code`
+- `Street_Address` (disabled)
+- `Full_Name` (disabled)
+
+Some infotypes are disabled in default classification config for optimum performance.
+To modify the default, set `info_types` config with list of infotypes you need.
+If you run into degraded performance due to this, tune `max_workers` to enable parallelisation.
 
 ### Supported sources
 

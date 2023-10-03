@@ -29,14 +29,20 @@ logger = logging.Logger(__name__)
 
 # FIVETRAN creates temporary tables in schema named FIVETRAN_xxx_STAGING.
 # Ref - https://support.fivetran.com/hc/en-us/articles/1500003507122-Why-Is-There-an-Empty-Schema-Named-Fivetran-staging-in-the-Destination-
+DEFAULT_TABLES_DENY_LIST = [
+    r".*\.FIVETRAN_.*_STAGING\..*",  # fivetran
+    rf".*\.SEGMENT_{UUID_REGEX}",  # segment
+    rf".*\.STAGING_.*_{UUID_REGEX}",  # stitch
+]
+
+# Temporary staging tables that have constant names for all data pipeline runs
+# i.e. do not change name across multiple runs.
+# We can merge lineage over such tables.
 #
 # DBT incremental models create temporary tables ending with __dbt_tmp
 # Ref - https://discourse.getdbt.com/t/handling-bigquery-incremental-dbt-tmp-tables/7540
-DEFAULT_TABLES_DENY_LIST = [
-    r".*\.FIVETRAN_.*_STAGING\..*",  # fivetran
+CONSTANT_NAME_TMP_TABLES = [
     r".*__DBT_TMP$",  # dbt
-    rf".*\.SEGMENT_{UUID_REGEX}",  # segment
-    rf".*\.STAGING_.*_{UUID_REGEX}",  # stitch
 ]
 
 

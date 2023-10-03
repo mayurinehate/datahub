@@ -23,6 +23,24 @@ def create_deny_regex_sql_filter(
     return upstream_sql_filter
 
 
+def create_allow_regex_sql_filter(
+    allow_pattern: List[str], filter_cols: List[str]
+) -> str:
+    upstream_sql_filter = (
+        " OR ".join(
+            [
+                (f"RLIKE({col_name},'{regexp}','i')")
+                for col_name in filter_cols
+                for regexp in allow_pattern
+            ]
+        )
+        if allow_pattern
+        else ""
+    )
+
+    return upstream_sql_filter
+
+
 class SnowflakeQuery:
     ACCESS_HISTORY_TABLE_VIEW_DOMAINS_FILTER = (
         "("
@@ -340,6 +358,30 @@ class SnowflakeQuery:
         ;"""
 
     @staticmethod
+    def create_temp_view_queries_for_time_window(
+        start_time_millis: int,
+        end_time_millis: int,
+        allow_pattern: List[str],
+    ) -> str:
+        temp_table_filter = create_deny_regex_sql_filter(
+            allow_pattern,
+            ["query_history.query_text"],
+        )
+        return f"""
+        SELECT DISTINCT
+            query_history.query_text AS "QUERY_TEXT",
+            query_history.query_type AS "QUERY_TYPE",
+        FROM
+            snowflake.account_usage.query_history query_history
+        WHERE 
+            query_history.start_time >= to_timestamp_ltz({start_time_millis}, 3)
+            AND query_history.start_time < to_timestamp_ltz({end_time_millis}, 3)
+            AND query_history.query_type='CREATE_VIEW'
+            {("AND " + temp_table_filter) if temp_table_filter else ""}
+            AND query_history.execution_status ='SUCCESS'
+        ;"""
+
+    @staticmethod
     def table_to_table_lineage_history(
         start_time_millis: int,
         end_time_millis: int,
@@ -396,58 +438,6 @@ class SnowflakeQuery:
           snowflake.account_usage.object_dependencies
         WHERE
           referencing_object_domain in ('VIEW', 'MATERIALIZED VIEW')
-        """
-
-    @staticmethod
-    def view_lineage_history(
-        start_time_millis: int,
-        end_time_millis: int,
-        include_column_lineage: bool = True,
-    ) -> str:
-        return f"""
-        WITH view_lineage_history AS (
-          SELECT
-            vu.value : "objectName"::varchar AS view_name,
-            vu.value : "objectDomain"::varchar AS view_domain,
-            vu.value : "columns" AS view_columns,
-            w.value : "objectName"::varchar AS downstream_table_name,
-            w.value : "objectDomain"::varchar AS downstream_table_domain,
-            w.value : "columns" AS downstream_table_columns,
-            t.query_start_time AS query_start_time
-          FROM
-            (
-              SELECT
-                *
-              FROM
-                snowflake.account_usage.access_history
-            ) t,
-            lateral flatten(input => t.DIRECT_OBJECTS_ACCESSED) vu,
-            lateral flatten(input => t.OBJECTS_MODIFIED) w
-          WHERE
-            vu.value : "objectId" IS NOT NULL
-            AND w.value : "objectId" IS NOT NULL
-            AND w.value : "objectName" NOT LIKE '%.GE_TMP_%'
-            AND w.value : "objectName" NOT LIKE '%.GE_TEMP_%'
-            AND t.query_start_time >= to_timestamp_ltz({start_time_millis}, 3)
-            AND t.query_start_time < to_timestamp_ltz({end_time_millis}, 3)
-        )
-        SELECT
-          view_name AS "VIEW_NAME",
-          view_domain AS "VIEW_DOMAIN",
-          view_columns AS "VIEW_COLUMNS",
-          downstream_table_name AS "DOWNSTREAM_TABLE_NAME",
-          downstream_table_domain AS "DOWNSTREAM_TABLE_DOMAIN",
-          downstream_table_columns AS "DOWNSTREAM_TABLE_COLUMNS"
-        FROM
-          view_lineage_history
-        WHERE
-          view_domain in ('View', 'Materialized view')
-          QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY view_name,
-            downstream_table_name {", downstream_table_columns" if include_column_lineage else ""}
-            ORDER BY
-              query_start_time DESC
-          ) = 1
         """
 
     # Note on use of `upstreams_deny_pattern` to ignore temporary tables:

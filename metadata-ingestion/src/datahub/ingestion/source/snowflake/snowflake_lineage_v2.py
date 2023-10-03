@@ -147,6 +147,7 @@ class SnowflakeLineageExtractor(
             else:
                 logger.info("No views found. Skipping View Lineage Extraction.")
 
+        import pdb; pdb.set_trace()
         yield from self.get_table_upstream_workunits(discovered_tables)
 
         if self._external_lineage_map:  # Some external lineage is yet to be emitted
@@ -183,6 +184,7 @@ class SnowflakeLineageExtractor(
             )  # See Edition Note above for why
         else:
             with PerfTimer() as timer:
+                # TODO: Change result to typed dict
                 results = self._fetch_upstream_lineages_for_tables()
 
                 if not results:
@@ -191,6 +193,7 @@ class SnowflakeLineageExtractor(
                 yield from self._gen_workunits_from_query_result(
                     discovered_tables, results
                 )
+                
                 self.report.table_lineage_query_secs = timer.elapsed_seconds()
             logger.info(
                 f"Upstream lineage detected for {self.report.num_tables_with_upstreams} tables.",

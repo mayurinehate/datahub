@@ -150,8 +150,8 @@ class SQLSourceReport(StaleEntityRemovalSourceReport):
         self.query_combiner = query_combiner_report
 
 
-class SqlWorkUnit(MetadataWorkUnit):
-    pass
+# TODO: Remove SqlWorkUnit
+SqlWorkUnit = MetadataWorkUnit
 
 
 _field_type_mapping: Dict[Type[TypeEngine], Type] = {

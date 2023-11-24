@@ -1,7 +1,3 @@
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional
-
 from pydantic.fields import Field
 
 from datahub.ingestion.api.common import PipelineContext
@@ -15,39 +11,6 @@ from datahub.ingestion.api.decorators import (
 )
 from datahub.ingestion.source.sql.sql_common import SQLAlchemySource
 from datahub.ingestion.source.sql.sql_config import SQLCommonConfig
-
-
-@dataclass
-class BaseColumn:
-    name: str
-    ordinal_position: int
-    is_nullable: bool
-    data_type: str
-    comment: Optional[str]
-
-
-@dataclass
-class BaseTable:
-    name: str
-    comment: Optional[str]
-    created: Optional[datetime]
-    last_altered: Optional[datetime]
-    size_in_bytes: Optional[int]
-    rows_count: Optional[int]
-    column_count: Optional[int] = None
-    ddl: Optional[str] = None
-
-
-@dataclass
-class BaseView:
-    name: str
-    comment: Optional[str]
-    created: Optional[datetime]
-    last_altered: Optional[datetime]
-    view_definition: Optional[str]
-    size_in_bytes: Optional[int] = None
-    rows_count: Optional[int] = None
-    column_count: Optional[int] = None
 
 
 class SQLAlchemyGenericConfig(SQLCommonConfig):

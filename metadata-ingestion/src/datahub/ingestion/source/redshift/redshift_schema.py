@@ -6,7 +6,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import redshift_connector
 
 from datahub.ingestion.source.redshift.query import RedshiftQuery
-from datahub.ingestion.source.sql.sql_generic import BaseColumn, BaseTable
+from datahub.ingestion.source.sql.common.models import BaseColumn, BaseTable
 from datahub.metadata.com.linkedin.pegasus2avro.schema import SchemaField
 from datahub.utilities.hive_schema_to_avro import get_schema_fields_for_hive_column
 

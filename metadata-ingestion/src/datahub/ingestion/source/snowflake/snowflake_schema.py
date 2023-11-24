@@ -1,7 +1,6 @@
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
 from functools import lru_cache
 from typing import Dict, List, Optional
 
@@ -11,7 +10,13 @@ from snowflake.connector import SnowflakeConnection
 from datahub.ingestion.source.snowflake.constants import SnowflakeObjectDomain
 from datahub.ingestion.source.snowflake.snowflake_query import SnowflakeQuery
 from datahub.ingestion.source.snowflake.snowflake_utils import SnowflakeQueryMixin
-from datahub.ingestion.source.sql.sql_generic import BaseColumn, BaseTable, BaseView
+from datahub.ingestion.source.sql.common.models import (
+    BaseColumn,
+    BaseDatabase,
+    BaseSchema,
+    BaseTable,
+    BaseView,
+)
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -95,22 +100,14 @@ class SnowflakeView(BaseView):
 
 
 @dataclass
-class SnowflakeSchema:
-    name: str
-    created: Optional[datetime]
-    last_altered: Optional[datetime]
-    comment: Optional[str]
+class SnowflakeSchema(BaseSchema):
     tables: List[str] = field(default_factory=list)
     views: List[str] = field(default_factory=list)
     tags: Optional[List[SnowflakeTag]] = None
 
 
 @dataclass
-class SnowflakeDatabase:
-    name: str
-    created: Optional[datetime]
-    comment: Optional[str]
-    last_altered: Optional[datetime] = None
+class SnowflakeDatabase(BaseDatabase):
     schemas: List[SnowflakeSchema] = field(default_factory=list)
     tags: Optional[List[SnowflakeTag]] = None
 

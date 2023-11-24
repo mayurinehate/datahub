@@ -15,7 +15,7 @@ from datahub.ingestion.source.snowflake.snowflake_schema import (
     SnowflakeTable,
 )
 from datahub.ingestion.source.snowflake.snowflake_utils import SnowflakeCommonMixin
-from datahub.ingestion.source.sql.sql_generic import BaseTable
+from datahub.ingestion.source.sql.common.models import BaseTable
 from datahub.ingestion.source.sql.sql_generic_profiler import GenericProfiler
 from datahub.ingestion.source.state.profiling_state_handler import ProfilingHandler
 

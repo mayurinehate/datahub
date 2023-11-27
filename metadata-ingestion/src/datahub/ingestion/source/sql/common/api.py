@@ -1,9 +1,12 @@
 from abc import ABCMeta, abstractmethod
-from typing import List
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Iterable, List, Optional
+
+if TYPE_CHECKING:
+    from datahub.ingestion.source.ge_data_profiler import DatahubGEProfiler
 
 from datahub.ingestion.source.sql.common.models import (
     BaseColumn,
-    BaseDatabase,
     BaseSchema,
     BaseTable,
     BaseView,
@@ -13,25 +16,52 @@ from datahub.ingestion.source.sql.common.models import (
 )
 
 
+@dataclass
+class TableDetail:
+    comment: Optional[str] = None
+    properties: Optional[dict] = None
+    location: Optional[str] = None
+
+
 class ExtractionInterface(ABCMeta):
     """Sql common metadata extraction interface"""
 
     @abstractmethod
-    def get_databases(self) -> List[BaseDatabase]:
+    def get_databases(self) -> List[DatabaseIdentifier]:
         pass
 
     @abstractmethod
-    def get_schemas(self, db: DatabaseIdentifier) -> List[BaseSchema]:
+    def get_schemas(self, db: DatabaseIdentifier) -> Iterable[BaseSchema]:
         pass
 
     @abstractmethod
-    def get_tables(self, schema: SchemaIdentifier) -> List[BaseTable]:
+    def get_tables(self, schema: SchemaIdentifier) -> Iterable[BaseTable]:
         pass
 
     @abstractmethod
-    def get_view(self, schema: SchemaIdentifier) -> List[BaseView]:
+    def get_views(self, schema: SchemaIdentifier) -> Iterable[BaseView]:
         pass
 
     @abstractmethod
-    def get_table_columns(self, table: TableIdentifier) -> List[BaseColumn]:
+    def get_table_columns(self, table: TableIdentifier) -> Iterable[BaseColumn]:
+        pass
+
+    @abstractmethod
+    def get_profiler_instance(self, db: DatabaseIdentifier) -> "DatahubGEProfiler":
+        pass
+
+    @abstractmethod
+    def get_table_details(self, table: TableIdentifier) -> TableDetail:
+        pass
+
+    @abstractmethod
+    def get_pk_constraint(self, table: TableIdentifier) -> dict:
+        pass
+
+    @abstractmethod
+    def get_foreign_keys(self, table: TableIdentifier) -> List[dict]:
+        pass
+
+    @abstractmethod
+    def get_view_definition(self, view: TableIdentifier) -> Optional[str]:
         pass

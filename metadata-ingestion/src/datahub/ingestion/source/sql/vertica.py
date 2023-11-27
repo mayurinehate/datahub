@@ -578,7 +578,6 @@ class VerticaSource(SQLAlchemySource):
             yield GEProfilerRequest(
                 pretty_name=dataset_name,
                 batch_kwargs=self.prepare_profiler_args(
-                    inspector=inspector,
                     schema=schema,
                     table=projection,
                     partition=partition,

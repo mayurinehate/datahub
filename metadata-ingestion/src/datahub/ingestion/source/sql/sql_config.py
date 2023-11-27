@@ -117,7 +117,9 @@ class SQLCommonConfig(
         return values
 
     @abstractmethod
-    def get_sql_alchemy_url(self):
+    def get_sql_alchemy_url(
+        self, uri_opts: Optional[Dict[str, Any]] = None, database: Optional[str] = None
+    ) -> str:
         pass
 
 

@@ -62,10 +62,10 @@ class BaseColumn:
 class BaseTable:
     name: str
     comment: Optional[str]
-    created: Optional[datetime]
-    last_altered: Optional[datetime]
-    size_in_bytes: Optional[int]
-    rows_count: Optional[int]
+    created: Optional[datetime] = None
+    last_altered: Optional[datetime] = None
+    size_in_bytes: Optional[int] = None
+    rows_count: Optional[int] = None
     column_count: Optional[int] = None
     ddl: Optional[str] = None
 
@@ -78,9 +78,9 @@ class BaseTable:
 class BaseView:
     name: str
     comment: Optional[str]
-    created: Optional[datetime]
-    last_altered: Optional[datetime]
-    view_definition: Optional[str]
+    created: Optional[datetime] = None
+    last_altered: Optional[datetime] = None
+    view_definition: Optional[str] = None
     size_in_bytes: Optional[int] = None
     rows_count: Optional[int] = None
     column_count: Optional[int] = None

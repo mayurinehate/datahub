@@ -7,6 +7,9 @@ from pydantic import Field, root_validator
 
 from datahub.configuration.common import AllowDenyPattern, ConfigModel
 from datahub.configuration.source_common import DEFAULT_ENV, DatasetSourceConfigMixin
+from datahub.ingestion.source.snowflake.snowflake_config import (
+    SnowflakeConnectionConfig,
+)
 from datahub.ingestion.source.state.stale_entity_removal_handler import (
     StaleEntityRemovalSourceReport,
     StatefulStaleMetadataRemovalConfig,
@@ -14,7 +17,6 @@ from datahub.ingestion.source.state.stale_entity_removal_handler import (
 from datahub.ingestion.source.state.stateful_ingestion_base import (
     StatefulIngestionConfigBase,
 )
-from datahub.ingestion.source_config.sql.snowflake import BaseSnowflakeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +62,7 @@ KNOWN_DATA_PLATFORM_MAPPING = {
 }
 
 
-class DestinationConfig(BaseSnowflakeConfig):
+class DestinationConfig(SnowflakeConnectionConfig):
     database: str = Field(description="The fivetran connector log database.")
     log_schema: str = Field(description="The fivetran connector log schema.")
 

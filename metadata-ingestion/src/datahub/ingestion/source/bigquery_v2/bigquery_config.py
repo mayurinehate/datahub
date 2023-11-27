@@ -351,7 +351,9 @@ class BigQueryV2Config(
     def get_table_pattern(self, pattern: List[str]) -> str:
         return "|".join(pattern) if pattern else ""
 
-    def get_sql_alchemy_url(self) -> str:
+    def get_sql_alchemy_url(
+        self, uri_opts: Optional[Dict[str, Any]] = None, database: Optional[str] = None
+    ) -> str:
         if self.project_on_behalf:
             return f"bigquery://{self.project_on_behalf}"
         # When project_id is not set, we will attempt to detect the project ID

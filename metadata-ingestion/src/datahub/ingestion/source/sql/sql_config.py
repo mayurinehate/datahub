@@ -1,4 +1,5 @@
 import logging
+import urllib.parse
 from abc import abstractmethod
 from typing import Any, Dict, Optional
 
@@ -38,6 +39,10 @@ class SQLCommonConfig(
     # having another option to allow/deny on schema level is an optimization for the case when there is a large number
     # of schemas that one wants to skip and you want to avoid the time to needlessly fetch those tables only to filter
     # them out afterwards via the table_pattern.
+    database_pattern: AllowDenyPattern = Field(
+        default=AllowDenyPattern.allow_all(),
+        description="Regex patterns for databases to filter in ingestion.",
+    )
     schema_pattern: AllowDenyPattern = Field(
         default=AllowDenyPattern.allow_all(),
         description="Regex patterns for schemas to filter in ingestion. Specify regex to only match the schema name. e.g. to match all tables in schema analytics, use the regex 'analytics'",
@@ -157,19 +162,34 @@ class SQLAlchemyConnectionConfig(ConfigModel):
     )
 
     def get_sql_alchemy_url(
-        self, uri_opts: Optional[Dict[str, Any]] = None, database: Optional[str] = None
+        self,
+        uri_opts: Optional[Dict[str, Any]] = None,
+        database: Optional[str] = None,
     ) -> str:
         if not ((self.host_port and self.scheme) or self.sqlalchemy_uri):
             raise ValueError("host_port and schema or connect_uri required.")
 
-        return self.sqlalchemy_uri or make_sqlalchemy_uri(
-            self.scheme,
-            self.username,
-            self.password.get_secret_value() if self.password is not None else None,
-            self.host_port,
-            database or self.database,
-            uri_opts=uri_opts,
-        )
+        if self.sqlalchemy_uri:
+            parsed_url = urllib.parse.urlsplit(self.sqlalchemy_uri)
+            url = URL.create(
+                drivername=parsed_url.scheme,
+                username=parsed_url.username,
+                password=parsed_url.password,
+                host=parsed_url.hostname,
+                port=parsed_url.port,
+                database=database or parsed_url.path.lstrip("/"),
+                query=urllib.parse.parse_qs(parsed_url.query),
+            ).update_query_dict(uri_opts or {})
+            return str(url)
+        else:
+            return make_sqlalchemy_uri(
+                self.scheme,
+                self.username,
+                self.password.get_secret_value() if self.password else None,
+                self.host_port,
+                database or self.database,
+                uri_opts=uri_opts,
+            )
 
 
 class BasicSQLAlchemyConfig(SQLAlchemyConnectionConfig, SQLCommonConfig):

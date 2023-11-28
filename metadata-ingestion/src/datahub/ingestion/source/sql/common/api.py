@@ -1,6 +1,8 @@
 from abc import ABCMeta, abstractmethod
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable, List, Optional
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
+
+from datahub.ingestion.source.sql.sql_report import SQLSourceReport
 
 if TYPE_CHECKING:
     from datahub.ingestion.source.ge_data_profiler import DatahubGEProfiler
@@ -19,11 +21,11 @@ from datahub.ingestion.source.sql.common.models import (
 @dataclass
 class TableDetail:
     comment: Optional[str] = None
-    properties: Optional[dict] = None
+    properties: dict = field(default_factory=dict)
     location: Optional[str] = None
 
 
-class ExtractionInterface(ABCMeta):
+class ExtractionInterface(metaclass=ABCMeta):
     """Sql common metadata extraction interface"""
 
     @abstractmethod
@@ -47,11 +49,15 @@ class ExtractionInterface(ABCMeta):
         pass
 
     @abstractmethod
-    def get_profiler_instance(self, db: DatabaseIdentifier) -> "DatahubGEProfiler":
+    def get_profiler_instance(
+        self, db: DatabaseIdentifier, report: SQLSourceReport, platform: str
+    ) -> "DatahubGEProfiler":
+        """Not the best one."""
         pass
 
     @abstractmethod
     def get_table_details(self, table: TableIdentifier) -> TableDetail:
+        """Not the best one."""
         pass
 
     @abstractmethod
@@ -59,7 +65,7 @@ class ExtractionInterface(ABCMeta):
         pass
 
     @abstractmethod
-    def get_foreign_keys(self, table: TableIdentifier) -> List[dict]:
+    def get_foreign_keys(self, table: TableIdentifier) -> List[Dict[str, Any]]:
         pass
 
     @abstractmethod

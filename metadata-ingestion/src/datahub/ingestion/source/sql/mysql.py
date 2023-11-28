@@ -1,11 +1,14 @@
 # This import verifies that the dependencies are available.
 
+import logging
+from typing import Iterable
+
 import pymysql  # noqa: F401
 from pydantic.fields import Field
-from sqlalchemy import util
+from sqlalchemy import create_engine, util
 from sqlalchemy.dialects.mysql import base
 from sqlalchemy.dialects.mysql.enumerated import SET
-from sqlalchemy.engine.reflection import Inspector
+from sqlalchemy.engine.row import LegacyRow
 
 from datahub.ingestion.api.decorators import (
     SourceCapability,
@@ -15,6 +18,7 @@ from datahub.ingestion.api.decorators import (
     platform_name,
     support_status,
 )
+from datahub.ingestion.api.workunit import MetadataWorkUnit
 from datahub.ingestion.source.sql.sql_common import (
     make_sqlalchemy_type,
     register_custom_type,
@@ -44,6 +48,8 @@ base.ischema_names["point"] = POINT
 base.ischema_names["linestring"] = LINESTRING
 base.ischema_names["polygon"] = POLYGON
 base.ischema_names["decimal128"] = DECIMAL128
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class MySQLConnectionConfig(SQLAlchemyConnectionConfig):
@@ -88,13 +94,24 @@ class MySQLSource(TwoTierSQLAlchemySource):
         config = MySQLConfig.parse_obj(config_dict)
         return cls(config, ctx)
 
-    def add_profile_metadata(self, inspector: Inspector) -> None:
-        if not self.config.is_profiling_enabled():
-            return
-        with inspector.engine.connect() as conn:
-            for row in conn.execute(
-                "SELECT table_schema, table_name, data_length from information_schema.tables"
-            ):
-                self.profile_metadata_info.dataset_name_to_storage_bytes[
-                    f"{row.table_schema}.{row.table_name}"
-                ] = row.data_length
+    def global_workunits_start_hook(self) -> Iterable[MetadataWorkUnit]:
+        if self.config.is_profiling_enabled():
+            url = self.config.get_sql_alchemy_url()
+            logger.debug(f"sql_alchemy_url={url}")
+            engine = create_engine(url, **self.config.options)
+            with engine.connect() as conn:
+                for row in conn.execute(
+                    "SELECT table_schema, table_name, data_length from information_schema.tables"
+                ):
+                    if isinstance(row, LegacyRow):
+                        schema = row[0]
+                        table = row[1]
+                        data_length = row[2]
+                    else:
+                        schema = row.table_schema
+                        table = row.table_name
+                        data_length = row.data_length
+                    self.profile_metadata_info.dataset_name_to_storage_bytes[
+                        f"{schema}.{table}"
+                    ] = data_length
+            yield from []

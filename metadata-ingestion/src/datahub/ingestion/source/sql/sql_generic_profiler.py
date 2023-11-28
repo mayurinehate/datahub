@@ -15,8 +15,8 @@ from datahub.ingestion.source.ge_data_profiler import (
     GEProfilerRequest,
 )
 from datahub.ingestion.source.sql.common.models import BaseTable, BaseView
-from datahub.ingestion.source.sql.sql_common import SQLSourceReport
 from datahub.ingestion.source.sql.sql_config import SQLCommonConfig
+from datahub.ingestion.source.sql.sql_report import SQLSourceReport
 from datahub.ingestion.source.state.profiling_state_handler import ProfilingHandler
 from datahub.metadata.com.linkedin.pegasus2avro.dataset import DatasetProfile
 from datahub.metadata.com.linkedin.pegasus2avro.timeseries import PartitionType

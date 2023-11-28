@@ -1,9 +1,9 @@
 from typing import Dict
-from unittest.mock import Mock
 
 import pytest
-from sqlalchemy.engine.reflection import Inspector
 
+from datahub.ingestion.source.sql.common.base_api import TWO_TIER_PLACEHOLDER_DB
+from datahub.ingestion.source.sql.common.models import SchemaIdentifier
 from datahub.ingestion.source.sql.sql_common import PipelineContext, SQLAlchemySource
 from datahub.ingestion.source.sql.sql_config import SQLCommonConfig
 from datahub.ingestion.source.sql.sqlalchemy_uri_mapper import (
@@ -24,7 +24,6 @@ def test_generate_foreign_key():
     config: SQLCommonConfig = _TestSQLAlchemyConfig()
     ctx: PipelineContext = PipelineContext(run_id="test_ctx")
     platform: str = "TEST"
-    inspector: Inspector = Mock()
     source = _TestSQLAlchemySource(config=config, ctx=ctx, platform=platform)
     fk_dict: Dict[str, str] = {
         "name": "test_constraint",
@@ -35,9 +34,8 @@ def test_generate_foreign_key():
     }
     foreign_key = source.get_foreign_key_metadata(
         dataset_urn="test_urn",
-        schema="test_schema",
+        schema=SchemaIdentifier("test_schema", TWO_TIER_PLACEHOLDER_DB),
         fk_dict=fk_dict,
-        inspector=inspector,
     )
 
     assert fk_dict.get("name") == foreign_key.name
@@ -51,7 +49,6 @@ def test_use_source_schema_for_foreign_key_if_not_specified():
     config: SQLCommonConfig = _TestSQLAlchemyConfig()
     ctx: PipelineContext = PipelineContext(run_id="test_ctx")
     platform: str = "TEST"
-    inspector: Inspector = Mock()
     source = _TestSQLAlchemySource(config=config, ctx=ctx, platform=platform)
     fk_dict: Dict[str, str] = {
         "name": "test_constraint",
@@ -61,9 +58,8 @@ def test_use_source_schema_for_foreign_key_if_not_specified():
     }
     foreign_key = source.get_foreign_key_metadata(
         dataset_urn="test_urn",
-        schema="test_schema",
+        schema=SchemaIdentifier("test_schema", TWO_TIER_PLACEHOLDER_DB),
         fk_dict=fk_dict,
-        inspector=inspector,
     )
 
     assert fk_dict.get("name") == foreign_key.name

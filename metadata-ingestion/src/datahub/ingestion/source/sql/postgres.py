@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, cast
 
 # This import verifies that the dependencies are available.
 import psycopg2  # noqa: F401
@@ -14,8 +14,8 @@ import sqlalchemy.dialects.postgresql as custom_types
 from geoalchemy2 import Geometry  # noqa: F401
 from pydantic import BaseModel
 from pydantic.fields import Field
-from sqlalchemy import create_engine, inspect
-from sqlalchemy.engine.reflection import Inspector
+from sqlalchemy import create_engine
+from sqlalchemy.engine.url import make_url
 
 from datahub.configuration.common import AllowDenyPattern
 from datahub.emitter import mce_builder
@@ -30,9 +30,14 @@ from datahub.ingestion.api.decorators import (
     support_status,
 )
 from datahub.ingestion.api.workunit import MetadataWorkUnit
+from datahub.ingestion.source.sql.common.api import ExtractionInterface
+from datahub.ingestion.source.sql.common.base_api import BaseExtractionApi
+from datahub.ingestion.source.sql.common.models import (
+    DatabaseIdentifier,
+    TableIdentifier,
+)
 from datahub.ingestion.source.sql.sql_common import (
     SQLAlchemySource,
-    SqlWorkUnit,
     register_custom_type,
 )
 from datahub.ingestion.source.sql.sql_config import BasicSQLAlchemyConfig
@@ -125,6 +130,36 @@ class PostgresConfig(BasePostgresConfig):
     )
 
 
+class PostgresExtractionApi(BaseExtractionApi):
+    def get_databases(self) -> List[DatabaseIdentifier]:
+        # Note: get_sql_alchemy_url will choose `sqlalchemy_uri` over the passed in database
+        config = cast(PostgresConfig, self.config)
+
+        url = self.config.get_sql_alchemy_url(
+            database=config.database or config.initial_database
+        )
+        logger.debug(f"sql_alchemy_url={url}")
+        engine = create_engine(url, **self.config.options)
+        with engine.connect() as conn:
+            if config.database:
+                return [DatabaseIdentifier(config.database)]
+            elif config.sqlalchemy_uri:
+                sqlalchemy_url = make_url(config.sqlalchemy_uri)
+                if sqlalchemy_url.database:
+                    return [DatabaseIdentifier(config.database)]
+                else:
+
+                    # TODO: Breaking change?
+                    raise
+            else:
+                # pg_database catalog -  https://www.postgresql.org/docs/current/catalog-pg-database.html
+                # exclude template databases - https://www.postgresql.org/docs/current/manage-ag-templatedbs.html
+                databases = conn.execute(
+                    "SELECT datname from pg_database where datname not in ('template0', 'template1')"
+                )
+                return [DatabaseIdentifier(db["datname"]) for db in databases]
+
+
 @platform_name("Postgres")
 @config_class(PostgresConfig)
 @support_status(SupportStatus.CERTIFIED)
@@ -148,49 +183,28 @@ class PostgresSource(SQLAlchemySource):
     def __init__(self, config: PostgresConfig, ctx: PipelineContext):
         super().__init__(config, ctx, "postgres")
 
+    def _get_extraction_interface(self) -> ExtractionInterface:
+        return PostgresExtractionApi(self.config, self.IS_TWO_TIER_PLATFORM)
+
     @classmethod
     def create(cls, config_dict, ctx):
         config = PostgresConfig.parse_obj(config_dict)
         return cls(config, ctx)
 
-    def get_inspectors(self) -> Iterable[Inspector]:
-        # Note: get_sql_alchemy_url will choose `sqlalchemy_uri` over the passed in database
-        url = self.config.get_sql_alchemy_url(
-            database=self.config.database or self.config.initial_database
-        )
+    def global_workunits_end_hook(self) -> Iterable[MetadataWorkUnit]:
+        if self.views_failed_parsing:
+            for database in self.api.get_databases():
+                if self.config.include_view_lineage:
+                    yield from self._get_view_lineage_workunits(database)
+
+    def _get_view_lineage_elements(
+        self, database: DatabaseIdentifier
+    ) -> Dict[Tuple[str, str], List[str]]:
+        data: List[ViewLineageEntry] = []
+        url = self.config.get_sql_alchemy_url(database=database.database_name)
         logger.debug(f"sql_alchemy_url={url}")
         engine = create_engine(url, **self.config.options)
         with engine.connect() as conn:
-            if self.config.database or self.config.sqlalchemy_uri:
-                inspector = inspect(conn)
-                yield inspector
-            else:
-                # pg_database catalog -  https://www.postgresql.org/docs/current/catalog-pg-database.html
-                # exclude template databases - https://www.postgresql.org/docs/current/manage-ag-templatedbs.html
-                databases = conn.execute(
-                    "SELECT datname from pg_database where datname not in ('template0', 'template1')"
-                )
-                for db in databases:
-                    if not self.config.database_pattern.allowed(db["datname"]):
-                        continue
-                    url = self.config.get_sql_alchemy_url(database=db["datname"])
-                    with create_engine(url, **self.config.options).connect() as conn:
-                        inspector = inspect(conn)
-                        yield inspector
-
-    def get_workunits_internal(self) -> Iterable[Union[MetadataWorkUnit, SqlWorkUnit]]:
-        yield from super().get_workunits_internal()
-
-        if self.views_failed_parsing:
-            for inspector in self.get_inspectors():
-                if self.config.include_view_lineage:
-                    yield from self._get_view_lineage_workunits(inspector)
-
-    def _get_view_lineage_elements(
-        self, inspector: Inspector
-    ) -> Dict[Tuple[str, str], List[str]]:
-        data: List[ViewLineageEntry] = []
-        with inspector.engine.connect() as conn:
             results = conn.execute(VIEW_LINEAGE_QUERY)
             if results.returns_rows is False:
                 return {}
@@ -219,9 +233,11 @@ class PostgresSource(SQLAlchemySource):
                 mce_builder.make_dataset_urn_with_platform_instance(
                     platform=self.platform,
                     name=self.get_identifier(
-                        schema=lineage.source_schema,
-                        entity=lineage.source_table,
-                        inspector=inspector,
+                        TableIdentifier.from_names(
+                            lineage.source_table,
+                            lineage.source_schema,
+                            database.database_name,
+                        )
                     ),
                     platform_instance=self.config.platform_instance,
                     env=self.config.env,
@@ -231,9 +247,9 @@ class PostgresSource(SQLAlchemySource):
         return lineage_elements
 
     def _get_view_lineage_workunits(
-        self, inspector: Inspector
+        self, database: DatabaseIdentifier
     ) -> Iterable[MetadataWorkUnit]:
-        lineage_elements = self._get_view_lineage_elements(inspector)
+        lineage_elements = self._get_view_lineage_elements(database)
 
         if not lineage_elements:
             return None
@@ -245,7 +261,9 @@ class PostgresSource(SQLAlchemySource):
 
             # Construct a lineage object.
             view_identifier = self.get_identifier(
-                schema=dependent_schema, entity=dependent_view, inspector=inspector
+                table=TableIdentifier.from_names(
+                    dependent_view, dependent_schema, database.database_name
+                )
             )
             if view_identifier not in self.views_failed_parsing:
                 return
@@ -265,14 +283,3 @@ class PostgresSource(SQLAlchemySource):
 
             for item in mcps_from_mce(lineage_mce):
                 yield item.as_workunit()
-
-    def get_identifier(
-        self, *, schema: str, entity: str, inspector: Inspector, **kwargs: Any
-    ) -> str:
-        regular = f"{schema}.{entity}"
-        if self.config.database:
-            if self.config.database_alias:
-                return f"{self.config.database_alias}.{regular}"
-            return f"{self.config.database}.{regular}"
-        current_database = self.get_db_name(inspector)
-        return f"{current_database}.{regular}"

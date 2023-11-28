@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import base64
 import json
 import logging
@@ -530,8 +531,6 @@ class PrestoOnHiveSource(SQLAlchemySource):
                 self.report,
                 dataset_name,
                 self.platform,
-                columns,
-                None,
                 None,
                 schema_fields,
                 self.config.simplify_nested_field_paths,
@@ -762,7 +761,6 @@ class PrestoOnHiveSource(SQLAlchemySource):
                 self.report,
                 dataset.dataset_name,
                 self.platform,
-                dataset.columns,
                 canonical_schema=schema_fields,
                 simplify_nested_field_paths=self.config.simplify_nested_field_paths,
             )

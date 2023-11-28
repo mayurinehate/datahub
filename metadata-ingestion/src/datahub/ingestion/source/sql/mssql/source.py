@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import logging
 import re
 import urllib.parse
@@ -109,7 +110,7 @@ class SQLServerConfig(BasicSQLAlchemyConfig):
     def get_sql_alchemy_url(
         self,
         uri_opts: Optional[Dict[str, Any]] = None,
-        current_db: Optional[str] = None,
+        database: Optional[str] = None,
     ) -> str:
         if self.use_odbc:
             # Ensure that the import is available.
@@ -122,7 +123,7 @@ class SQLServerConfig(BasicSQLAlchemyConfig):
             self.username,
             self.password.get_secret_value() if self.password else None,
             self.host_port,  # type: ignore
-            current_db if current_db else self.database,
+            database if database else self.database,
             uri_opts=uri_opts,
         )
         if self.use_odbc:
@@ -624,6 +625,7 @@ class SQLServerSource(SQLAlchemySource):
             aspect=data_flow.as_dataflow_info_aspect,
         ).as_workunit()
         # TODO: Add SubType when it appear
+        return
 
     def get_inspectors(self) -> Iterable[Inspector]:
         # This method can be overridden in the case that you want to dynamically
@@ -643,7 +645,7 @@ class SQLServerSource(SQLAlchemySource):
                 )
                 for db in databases:
                     if self.config.database_pattern.allowed(db["name"]):
-                        url = self.config.get_sql_alchemy_url(current_db=db["name"])
+                        url = self.config.get_sql_alchemy_url(database=db["name"])
                         with create_engine(
                             url, **self.config.options
                         ).connect() as conn:

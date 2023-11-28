@@ -50,7 +50,7 @@ from datahub.ingestion.source.profiling.common import (
     Cardinality,
     convert_to_cardinality,
 )
-from datahub.ingestion.source.sql.sql_common import SQLSourceReport
+from datahub.ingestion.source.sql.sql_report import SQLSourceReport
 from datahub.metadata.schema_classes import (
     DatasetFieldProfileClass,
     DatasetProfileClass,

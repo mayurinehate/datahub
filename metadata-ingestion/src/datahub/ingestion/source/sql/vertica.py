@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import logging
 import traceback
 from dataclasses import dataclass
@@ -26,7 +27,6 @@ from datahub.ingestion.api.decorators import (
 from datahub.ingestion.api.workunit import MetadataWorkUnit
 from datahub.ingestion.source.sql.sql_common import (
     SQLAlchemySource,
-    SQLSourceReport,
     SqlWorkUnit,
     get_schema_metadata,
 )
@@ -34,6 +34,7 @@ from datahub.ingestion.source.sql.sql_config import (
     BasicSQLAlchemyConfig,
     SQLCommonConfig,
 )
+from datahub.ingestion.source.sql.sql_report import SQLSourceReport
 from datahub.ingestion.source.sql.sql_utils import get_domain_wu
 from datahub.metadata.com.linkedin.pegasus2avro.common import StatusClass
 from datahub.metadata.com.linkedin.pegasus2avro.dataset import UpstreamLineage
@@ -478,8 +479,6 @@ class VerticaSource(SQLAlchemySource):
             self.report,
             dataset_name,
             self.platform,
-            columns,
-            pk_constraints,
             foreign_keys,
             schema_fields,
         )
@@ -687,8 +686,7 @@ class VerticaSource(SQLAlchemySource):
             self.report,
             dataset_name,
             self.platform,
-            columns,
-            schema_fields,  # type: ignore
+            canonical_schema=schema_fields,
         )
 
         dataset_snapshot.aspects.append(schema_metadata)

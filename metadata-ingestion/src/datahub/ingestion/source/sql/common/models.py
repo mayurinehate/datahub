@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 
 # identifier for Database
@@ -21,6 +21,18 @@ class SchemaIdentifier:
 class TableIdentifier:
     table_name: str
     schema_id: SchemaIdentifier
+
+    @classmethod
+    def from_names(
+        cls, table_name: str, schema_name: str, database_name: Optional[str]
+    ) -> "TableIdentifier":
+        return TableIdentifier(
+            table_name=table_name,
+            schema_id=SchemaIdentifier(
+                schema_name=schema_name,
+                database_id=DatabaseIdentifier(database_name=database_name),
+            ),
+        )
 
 
 # dataclass containing schema basic details
@@ -55,6 +67,7 @@ class BaseColumn:
     is_nullable: bool
     data_type: str
     comment: Optional[str]
+    sqlalchemy_type: Any  # Not clean
 
 
 # dataclass containing table basic details

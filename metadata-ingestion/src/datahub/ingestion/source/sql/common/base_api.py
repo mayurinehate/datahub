@@ -1,5 +1,5 @@
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, cast
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.reflection import Inspector
@@ -21,6 +21,7 @@ from datahub.ingestion.source.sql.sql_config import (
     BasicSQLAlchemyConfig,
     SQLCommonConfig,
 )
+from datahub.ingestion.source.sql.sql_report import SQLSourceReport
 
 if TYPE_CHECKING:
     from datahub.ingestion.source.ge_data_profiler import DatahubGEProfiler
@@ -43,15 +44,15 @@ class BaseExtractionApi(ExtractionInterface, Closeable):
         self._inspector_cache: Dict[DatabaseIdentifier, Inspector] = {}
 
     def get_databases(self) -> List[DatabaseIdentifier]:
+        if self.IS_TWO_TIER_PLATFORM:
+            # For a platform with 2 tier representation, it is okay to not implement this,
+            # as inspector.get_schema_names can be used to get list of top-level containers (i.e. schemas).
+            return [TWO_TIER_PLACEHOLDER_DB]
+
         if isinstance(self.config, BasicSQLAlchemyConfig):
             config = cast(BasicSQLAlchemyConfig, self.config)
             if config.database:
                 return [DatabaseIdentifier(config.database)]
-
-        if self.IS_TWO_TIER_PLATFORM:
-            # For a platform with 2 tier representation, it is okay to not implement this,
-            # as inspector.get_schema_names can be used to get list of top-level containers (i.e. schemas).
-            yield TWO_TIER_PLACEHOLDER_DB
 
         # This method must be implemented for a platform with 3 tier representation,
         # unless ingestion is for a particular database only.
@@ -59,6 +60,12 @@ class BaseExtractionApi(ExtractionInterface, Closeable):
         raise NotImplementedError()
 
     def get_schemas(self, db: DatabaseIdentifier) -> Iterable[BaseSchema]:
+        if self.IS_TWO_TIER_PLATFORM and isinstance(self.config, BasicSQLAlchemyConfig):
+            config = cast(BasicSQLAlchemyConfig, self.config)
+            if config.database:
+                yield from [BaseSchema(config.database)]
+                return
+
         inspector = self._get_inspector(db)
         for schema in inspector.get_schema_names():
             yield self._get_schema(SchemaIdentifier(schema, db))
@@ -119,7 +126,7 @@ class BaseExtractionApi(ExtractionInterface, Closeable):
             data_type=column.get("full_type", repr(column["type"])),
             comment=column.get("comment", None),
             is_nullable=column["nullable"],
-            # tags #TODO
+            sqlalchemy_type=column["type"],
         )
 
     def _get_inspector(self, db: DatabaseIdentifier) -> Inspector:
@@ -129,9 +136,10 @@ class BaseExtractionApi(ExtractionInterface, Closeable):
             url = self.config.get_sql_alchemy_url(database=db.database_name)
             logger.debug(f"sql_alchemy_url={url}")
             engine = create_engine(url, **self.config.options)
-            with engine.connect() as conn:
-                inspector = inspect(conn)
-                return inspector
+            conn = engine.connect()
+            inspector = inspect(conn)
+            self._inspector_cache[db] = inspector
+            return inspector
 
     def _get_schema(self, schema: SchemaIdentifier) -> BaseSchema:
         return BaseSchema(schema.schema_name)
@@ -149,14 +157,16 @@ class BaseExtractionApi(ExtractionInterface, Closeable):
         for inspector in self._inspector_cache.values():
             inspector.engine.dispose()
 
-    def get_profiler_instance(self, db: DatabaseIdentifier) -> "DatahubGEProfiler":
+    def get_profiler_instance(
+        self, db: DatabaseIdentifier, report: SQLSourceReport, platform: str
+    ) -> "DatahubGEProfiler":
         from datahub.ingestion.source.ge_data_profiler import DatahubGEProfiler
 
         return DatahubGEProfiler(
             conn=self._get_inspector(db).bind,
-            report=self.report,
+            report=report,
             config=self.config.profiling,
-            platform=self.platform,
+            platform=platform,
         )
 
     def get_pk_constraint(self, table: TableIdentifier) -> dict:
@@ -165,11 +175,11 @@ class BaseExtractionApi(ExtractionInterface, Closeable):
             table.table_name, table.schema_id.schema_name
         )
 
-    def get_foreign_keys(self, table: TableIdentifier) -> dict:
+    def get_foreign_keys(self, table: TableIdentifier) -> List[Dict[str, Any]]:
         inspector = self._get_inspector(table.schema_id.database_id)
         return inspector.get_foreign_keys(table.table_name, table.schema_id.schema_name)
 
-    def get_view_definition(self, view: TableIdentifier) -> dict:
+    def get_view_definition(self, view: TableIdentifier) -> Optional[str]:
         inspector = self._get_inspector(view.schema_id.database_id)
         return inspector.get_view_definition(
             view.table_name, view.schema_id.schema_name

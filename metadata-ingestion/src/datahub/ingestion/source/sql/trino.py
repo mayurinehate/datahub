@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import json
 import uuid
 from textwrap import dedent

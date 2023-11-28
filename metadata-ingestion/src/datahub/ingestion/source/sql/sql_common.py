@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import logging
 import traceback
@@ -27,7 +28,6 @@ from datahub.emitter.mce_builder import (
     make_data_platform_urn,
     make_dataplatform_instance_urn,
     make_dataset_urn_with_platform_instance,
-    make_tag_urn,
 )
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.sql_parsing_builder import SqlParsingBuilder
@@ -40,16 +40,18 @@ from datahub.ingestion.source.common.subtypes import (
     DatasetSubTypes,
 )
 from datahub.ingestion.source.sql.common.api import ExtractionInterface
-from datahub.ingestion.source.sql.common.base_api import (
-    TWO_TIER_PLACEHOLDER_DB,
-    BaseExtractionApi,
-)
+from datahub.ingestion.source.sql.common.base_api import BaseExtractionApi
 from datahub.ingestion.source.sql.common.models import (
+    BaseColumn,
+    BaseSchema,
+    BaseTable,
+    BaseView,
     DatabaseIdentifier,
     SchemaIdentifier,
     TableIdentifier,
 )
 from datahub.ingestion.source.sql.sql_config import SQLCommonConfig
+from datahub.ingestion.source.sql.sql_report import SQLSourceReport
 from datahub.ingestion.source.sql.sql_utils import (
     add_table_to_schema_container,
     downgrade_schema_from_v2,
@@ -62,7 +64,6 @@ from datahub.ingestion.source.sql.sql_utils import (
 )
 from datahub.ingestion.source.state.stale_entity_removal_handler import (
     StaleEntityRemovalHandler,
-    StaleEntityRemovalSourceReport,
 )
 from datahub.ingestion.source.state.stateful_ingestion_base import (
     StatefulIngestionSourceBase,
@@ -92,17 +93,13 @@ from datahub.metadata.schema_classes import (
     DataPlatformInstanceClass,
     DatasetLineageTypeClass,
     DatasetPropertiesClass,
-    GlobalTagsClass,
     SubTypesClass,
-    TagAssociationClass,
     UpstreamClass,
     ViewPropertiesClass,
 )
 from datahub.telemetry import telemetry
 from datahub.utilities.file_backed_collections import FileBackedDict
-from datahub.utilities.lossy_collections import LossyList
 from datahub.utilities.registries.domain_registry import DomainRegistry
-from datahub.utilities.sqlalchemy_query_combiner import SQLAlchemyQueryCombinerReport
 from datahub.utilities.sqlglot_lineage import (
     SchemaResolver,
     SqlParsingResult,
@@ -119,43 +116,6 @@ if TYPE_CHECKING:
 logger: logging.Logger = logging.getLogger(__name__)
 
 MISSING_COLUMN_INFO = "missing column information"
-
-
-@dataclass
-class SQLSourceReport(StaleEntityRemovalSourceReport):
-    tables_scanned: int = 0
-    views_scanned: int = 0
-    entities_profiled: int = 0
-    filtered: LossyList[str] = field(default_factory=LossyList)
-
-    query_combiner: Optional[SQLAlchemyQueryCombinerReport] = None
-
-    num_view_definitions_parsed: int = 0
-    num_view_definitions_failed_parsing: int = 0
-    num_view_definitions_failed_column_parsing: int = 0
-    view_definitions_parsing_failures: LossyList[str] = field(default_factory=LossyList)
-
-    def report_entity_scanned(self, name: str, ent_type: str = "table") -> None:
-        """
-        Entity could be a view or a table
-        """
-        if ent_type == "table":
-            self.tables_scanned += 1
-        elif ent_type == "view":
-            self.views_scanned += 1
-        else:
-            raise KeyError(f"Unknown entity {ent_type}.")
-
-    def report_entity_profiled(self, name: str) -> None:
-        self.entities_profiled += 1
-
-    def report_dropped(self, ent_name: str) -> None:
-        self.filtered.append(ent_name)
-
-    def report_from_query_combiner(
-        self, query_combiner_report: SQLAlchemyQueryCombinerReport
-    ) -> None:
-        self.query_combiner = query_combiner_report
 
 
 # TODO: Remove SqlWorkUnit
@@ -263,8 +223,6 @@ def get_schema_metadata(
     sql_report: SQLSourceReport,
     dataset_name: str,
     platform: str,
-    columns: List[dict],
-    pk_constraints: Optional[dict] = None,
     foreign_keys: Optional[List[ForeignKeyConstraint]] = None,
     canonical_schema: Optional[List[SchemaField]] = None,
     simplify_nested_field_paths: bool = False,
@@ -356,9 +314,10 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         else:
             self._view_definition_cache = {}
 
-        self.api: ExtractionInterface = BaseExtractionApi(
-            config, self.IS_TWO_TIER_PLATFORM
-        )
+        self.api: ExtractionInterface = self._get_extraction_interface()
+
+    def _get_extraction_interface(self):
+        return BaseExtractionApi(self.config, self.IS_TWO_TIER_PLATFORM)
 
     @property
     def IS_TWO_TIER_PLATFORM(self) -> bool:
@@ -408,31 +367,34 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
 
     def gen_schema_containers(
         self,
-        schema: SchemaIdentifier,
+        schema: BaseSchema,
+        schema_id: SchemaIdentifier,
         extra_properties: Optional[Dict[str, Any]] = None,
     ) -> Iterable[MetadataWorkUnit]:
         if self.IS_TWO_TIER_PLATFORM:
             # For 2-tier platforms, we generate schema containers as database containers
-            self.gen_database_containers(schema.schema_name)
-        else:
+            yield from self.gen_database_containers(schema.name)
+        elif (
+            schema_id.database_id.database_name
+        ):  # This is always true for 3-tier source
             database_container_key = gen_database_key(
-                schema.database_id.database_name,
+                schema_id.database_id.database_name,
                 platform=self.platform,
                 platform_instance=self.config.platform_instance,
                 env=self.config.env,
             )
 
             schema_container_key = gen_schema_key(
-                db_name=schema.database_id.database_name,
-                schema=schema.schema_name,
+                db_name=schema_id.database_id.database_name,
+                schema=schema.name,
                 platform=self.platform,
                 platform_instance=self.config.platform_instance,
                 env=self.config.env,
             )
 
             yield from gen_schema_container(
-                database=schema.database_id.database_name,
-                schema=schema.schema_name,
+                database=schema_id.database_id.database_name,
+                schema=schema.name,
                 schema_container_key=schema_container_key,
                 database_container_key=database_container_key,
                 sub_types=[DatasetContainerSubTypes.SCHEMA],
@@ -440,6 +402,8 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 domain_config=self.config.domain,
                 extra_properties=extra_properties,
             )
+        else:
+            self.report.report_warning("Schema without parent database", schema.name)
 
     def add_table_to_schema_container(
         self,
@@ -448,7 +412,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
     ) -> Iterable[MetadataWorkUnit]:
         if self.IS_TWO_TIER_PLATFORM:
             schema_container_key = gen_database_key(
-                db_name=schema.schema_name,
+                database=schema.schema_name,
                 platform=self.platform,
                 platform_instance=self.config.platform_instance,
                 env=self.config.env,
@@ -458,7 +422,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 dataset_urn=dataset_urn,
                 parent_container_key=schema_container_key,
             )
-        else:
+        elif schema.database_id.database_name:  # This is always true for 3-tier source
             schema_container_key = gen_schema_key(
                 db_name=schema.database_id.database_name,
                 schema=schema.schema_name,
@@ -471,26 +435,30 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 dataset_urn=dataset_urn,
                 parent_container_key=schema_container_key,
             )
+        else:
+            self.report.report_warning(
+                "Table without parent schema/database", dataset_urn
+            )
 
     def get_database_level_workunits(
         self,
         database: DatabaseIdentifier,
     ) -> Iterable[MetadataWorkUnit]:
-        if database == TWO_TIER_PLACEHOLDER_DB and self.IS_TWO_TIER_PLATFORM:
-            # If we are using 2-tier platform, we don't need to generate database containers here.
-            return
-        yield from self.gen_database_containers(database=database.database_name)
+        if (
+            not self.IS_TWO_TIER_PLATFORM and database.database_name
+        ):  # This is always true for 3-tier source
+            yield from self.gen_database_containers(database=database.database_name)
 
     def get_schema_level_workunits(
-        self, schema: SchemaIdentifier
-    ) -> Iterable[Union[MetadataWorkUnit, SqlWorkUnit]]:
-        yield from self.gen_schema_containers(schema=schema)
+        self, schema: BaseSchema, schema_id: SchemaIdentifier
+    ) -> Iterable[MetadataWorkUnit]:
+        yield from self.gen_schema_containers(schema=schema, schema_id=schema_id)
 
         if self.config.include_tables:
-            yield from self.loop_tables(schema, self.config)
+            yield from self.loop_tables(schema_id, self.config)
 
         if self.config.include_views:
-            yield from self.loop_views(schema, self.config)
+            yield from self.loop_views(schema_id, self.config)
 
     def get_workunit_processors(self) -> List[Optional[MetadataWorkUnitProcessor]]:
         return [
@@ -505,7 +473,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             ).workunit_processor,
         ]
 
-    def get_workunits_internal(self) -> Iterable[Union[MetadataWorkUnit, SqlWorkUnit]]:
+    def get_workunits_internal(self) -> Iterable[MetadataWorkUnit]:
         if logger.isEnabledFor(logging.DEBUG):
             # If debug logging is enabled, we also want to echo each SQL query issued.
             self.config.options.setdefault("echo", True)
@@ -524,27 +492,35 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             # Or `database` config should be specified in recipe.
             raise
 
+        with contextlib.suppress(NotImplementedError):
+            yield from self.global_workunits_start_hook()
+
         for database in databases:
+            if (
+                not self.IS_TWO_TIER_PLATFORM
+                and database.database_name
+                and not self.config.database_pattern.allowed(database.database_name)
+            ):
+                self.report.report_dropped(f"{database.database_name}.*")
+                continue
             yield from self._process_database(database)
 
         if self.config.include_view_lineage:
             yield from self.get_view_lineage()
 
+        with contextlib.suppress(NotImplementedError):
+            yield from self.global_workunits_end_hook()
+
+    def global_workunits_start_hook(self) -> Iterable[MetadataWorkUnit]:
+        raise NotImplementedError()
+
+    def global_workunits_end_hook(self) -> Iterable[MetadataWorkUnit]:
+        raise NotImplementedError()
+
     def _process_database(
         self, database: DatabaseIdentifier
     ) -> Iterable[MetadataWorkUnit]:
-        profiler = None
         profile_requests: List["GEProfilerRequest"] = []
-        if self.config.is_profiling_enabled():
-            profiler = self.api.get_profiler_instance(database)
-            try:
-                self.add_profile_metadata(None)  # TODO
-            except Exception as e:
-                self.warn(
-                    logger,
-                    "profile_metadata",
-                    f"Failed to get enrichment data for profile {e}",
-                )
 
         yield from self.get_database_level_workunits(database)
 
@@ -553,23 +529,30 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 self.report.report_dropped(f"{schema}.*")
                 continue
             else:
-                yield from self._process_schema(schema, profiler, profile_requests)
+                yield from self._process_schema(
+                    schema, schema.id(database), profile_requests
+                )
 
-        if profiler and profile_requests:
+        if self.config.is_profiling_enabled() and profile_requests:
+            profiler = self.api.get_profiler_instance(
+                database, self.report, self.platform
+            )
             yield from self.loop_profiler(
                 profile_requests, profiler, platform=self.platform
             )
 
     def _process_schema(
         self,
-        schema: SchemaIdentifier,
-        profiler: Optional[DatahubGEProfiler],
-        profile_requests: List[GEProfilerRequest],
+        schema: BaseSchema,
+        schema_id: SchemaIdentifier,
+        profile_requests: List["GEProfilerRequest"],
     ) -> Iterable[MetadataWorkUnit]:
-        yield from self.get_schema_level_workunits(schema=schema)
+        yield from self.get_schema_level_workunits(schema=schema, schema_id=schema_id)
 
-        if profiler:
-            profile_requests += list(self.loop_profiler_requests(schema, self.config))
+        if self.config.is_profiling_enabled():
+            profile_requests += list(
+                self.loop_profiler_requests(schema_id, self.config)
+            )
 
     def get_view_lineage(self) -> Iterable[MetadataWorkUnit]:
         builder = SqlParsingBuilder(
@@ -598,15 +581,14 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         yield from builder.gen_workunits()
 
     def get_identifier(self, table: TableIdentifier) -> str:
-        # Many SQLAlchemy dialects have three-level hierarchies. This method, which
-        # subclasses can override, enables them to modify the identifiers as needed.
-        if hasattr(self.config, "get_identifier"):
-            # This path is deprecated and will eventually be removed.
-            return self.config.get_identifier(schema=table.schema_id.schema_name, table=table.table_name)  # type: ignore
         if self.IS_TWO_TIER_PLATFORM:
             return f"{table.schema_id.schema_name}.{table.table_name}"
-        else:
+        elif (
+            table.schema_id.database_id.database_name
+        ):  # This is always true for 3-tier source
             return f"{table.schema_id.database_id.database_name}.{table.schema_id.schema_name}.{table.table_name}"
+        else:
+            raise
 
     def get_foreign_key_metadata(
         self,
@@ -650,7 +632,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         tables_seen: Set[str] = set()
         try:
             for table in self.api.get_tables(schema):
-                dataset_name = self.get_identifier(table)
+                dataset_name = self.get_identifier(table.id(schema))
 
                 if dataset_name not in tables_seen:
                     tables_seen.add(dataset_name)
@@ -664,7 +646,9 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                     continue
 
                 try:
-                    yield from self._process_table(dataset_name, table, sql_config)
+                    yield from self._process_table(
+                        dataset_name, table, table.id(schema), sql_config
+                    )
                 except Exception as e:
                     self.warn(logger, f"{schema}.{table}", f"Ingestion error: {e}")
         except Exception as e:
@@ -673,10 +657,11 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
     def _process_table(
         self,
         dataset_name: str,
-        table: TableIdentifier,
+        table: BaseTable,
+        table_id: TableIdentifier,
         sql_config: SQLCommonConfig,
     ) -> Iterable[Union[SqlWorkUnit, MetadataWorkUnit]]:
-        columns = self.api.get_table_columns(table)
+        columns = list(self.api.get_table_columns(table_id))
         dataset_urn = make_dataset_urn_with_platform_instance(
             self.platform,
             dataset_name,
@@ -688,10 +673,10 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             aspects=[StatusClass(removed=False)],
         )
 
-        detail = self.api.get_table_details(table)
+        detail = self.api.get_table_details(table_id)
 
         dataset_properties = DatasetPropertiesClass(
-            name=table,
+            name=table.name,
             description=detail.comment,
             customProperties=detail.properties,
         )
@@ -707,17 +692,13 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 aspect=UpstreamLineage(upstreams=[external_upstream_table]),
             ).as_workunit()
 
-        pk_constraints: dict = self.api.get_pk_constraint(table)
-        foreign_keys = self._get_foreign_keys(dataset_urn, table)
-        schema_fields = self.get_schema_fields(
-            dataset_name, columns, pk_constraints, tags=None
-        )
+        pk_constraints: dict = self.api.get_pk_constraint(table_id)
+        foreign_keys = self._get_foreign_keys(dataset_urn, table_id)
+        schema_fields = self.get_schema_fields(dataset_name, columns, pk_constraints)
         schema_metadata = get_schema_metadata(
             self.report,
             dataset_name,
             self.platform,
-            columns,
-            pk_constraints,
             foreign_keys,
             schema_fields,
         )
@@ -726,7 +707,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             self.schema_resolver.add_schema_metadata(dataset_urn, schema_metadata)
 
         yield from self.add_table_to_schema_container(
-            dataset_urn=dataset_urn, schema=table.schema_id
+            dataset_urn=dataset_urn, schema=table_id.schema_id
         )
         mce = MetadataChangeEvent(proposedSnapshot=dataset_snapshot)
         yield SqlWorkUnit(id=dataset_name, mce=mce)
@@ -749,18 +730,6 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 domain_config=sql_config.domain,
                 domain_registry=self.domain_registry,
             )
-
-    # TODO
-    def get_database_properties(
-        self, inspector: Inspector, database: str
-    ) -> Optional[Dict[str, str]]:
-        return None
-
-    # TODO
-    def get_schema_properties(
-        self, inspector: Inspector, database: str, schema: str
-    ) -> Optional[Dict[str, str]]:
-        return None
 
     # TODO
     def get_table_properties(
@@ -804,17 +773,13 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
     def get_schema_fields(
         self,
         dataset_name: str,
-        columns: List[dict],
+        columns: List[BaseColumn],
         pk_constraints: Optional[dict] = None,
-        tags: Optional[Dict[str, List[str]]] = None,
     ) -> List[SchemaField]:
         canonical_schema = []
         for column in columns:
-            column_tags: Optional[List[str]] = None
-            if tags:
-                column_tags = tags.get(column["name"], [])
             fields = self.get_schema_fields_for_column(
-                dataset_name, column, pk_constraints, tags=column_tags
+                dataset_name, column, pk_constraints
             )
             canonical_schema.extend(fields)
         return canonical_schema
@@ -822,28 +787,21 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
     def get_schema_fields_for_column(
         self,
         dataset_name: str,
-        column: dict,
+        column: BaseColumn,
         pk_constraints: Optional[dict] = None,
-        tags: Optional[List[str]] = None,
     ) -> List[SchemaField]:
-        gtc: Optional[GlobalTagsClass] = None
-        if tags:
-            tags_str = [make_tag_urn(t) for t in tags]
-            tags_tac = [TagAssociationClass(t) for t in tags_str]
-            gtc = GlobalTagsClass(tags_tac)
         field = SchemaField(
-            fieldPath=column["name"],
-            type=get_column_type(self.report, dataset_name, column["type"]),
-            nativeDataType=column.get("full_type", repr(column["type"])),
-            description=column.get("comment", None),
-            nullable=column["nullable"],
+            fieldPath=column.name,
+            type=get_column_type(self.report, dataset_name, column.sqlalchemy_type),
+            nativeDataType=column.data_type,
+            description=column.comment,
+            nullable=column.is_nullable,
             recursive=False,
-            globalTags=gtc,
         )
         if (
             pk_constraints is not None
             and isinstance(pk_constraints, dict)  # some dialects (hive) return list
-            and column["name"] in pk_constraints.get("constrained_columns", [])
+            and column.name in pk_constraints.get("constrained_columns", [])
         ):
             field.isPartOfKey = True
         return [field]
@@ -855,7 +813,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
     ) -> Iterable[Union[SqlWorkUnit, MetadataWorkUnit]]:
         try:
             for view in self.api.get_views(schema):
-                dataset_name = self.get_identifier(table=view)
+                dataset_name = self.get_identifier(table=view.id(schema))
                 self.report.report_entity_scanned(dataset_name, ent_type="view")
 
                 if not sql_config.view_pattern.allowed(dataset_name):
@@ -866,6 +824,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                     yield from self._process_view(
                         dataset_name=dataset_name,
                         view=view,
+                        view_id=view.id(schema),
                         sql_config=sql_config,
                     )
                 except Exception as e:
@@ -876,7 +835,8 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
     def _process_view(
         self,
         dataset_name: str,
-        view: TableIdentifier,
+        view: BaseView,
+        view_id: TableIdentifier,
         sql_config: SQLCommonConfig,
     ) -> Iterable[Union[SqlWorkUnit, MetadataWorkUnit]]:
         dataset_urn = make_dataset_urn_with_platform_instance(
@@ -886,7 +846,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             self.config.env,
         )
         try:
-            columns = self.api.get_table_columns(view)
+            columns = list(self.api.get_table_columns(view_id))
         except KeyError:
             # For certain types of views, we are unable to fetch the list of columns.
             self.warn(logger, dataset_name, "unable to get schema for this view")
@@ -897,14 +857,13 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 self.report,
                 dataset_name,
                 self.platform,
-                columns,
                 canonical_schema=schema_fields,
             )
             if self.config.include_view_lineage:
                 self.schema_resolver.add_schema_metadata(dataset_urn, schema_metadata)
-        description, properties, _ = self.api.get_table_details(view)
+        table_detail = self.api.get_table_details(view_id)
         try:
-            view_definition = self.api.get_view_definition(view)
+            view_definition = self.api.get_view_definition(view_id)
             if view_definition is None:
                 view_definition = ""
             else:
@@ -913,8 +872,8 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 view_definition = str(view_definition)
         except NotImplementedError:
             view_definition = ""
-        properties["view_definition"] = view_definition
-        properties["is_view"] = "True"
+        table_detail.properties["view_definition"] = view_definition
+        table_detail.properties["is_view"] = "True"
         if view_definition and self.config.include_view_lineage:
             self._view_definition_cache[dataset_name] = view_definition
 
@@ -925,13 +884,13 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
 
         yield from self.add_table_to_schema_container(
             dataset_urn=dataset_urn,
-            schema=view.schema_id,
+            schema=view_id.schema_id,
         )
 
         dataset_properties = DatasetPropertiesClass(
-            name=view,
-            description=description,
-            customProperties=properties,
+            name=view.name,
+            description=table_detail.comment,
+            customProperties=table_detail.properties,
         )
         dataset_snapshot.aspects.append(dataset_properties)
         if schema_metadata:
@@ -945,8 +904,8 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             entityUrn=dataset_urn,
             aspect=SubTypesClass(typeNames=[DatasetSubTypes.VIEW]),
         ).as_workunit()
-        if "view_definition" in properties:
-            view_definition_string = properties["view_definition"]
+        if "view_definition" in table_detail.properties:
+            view_definition_string = table_detail.properties["view_definition"]
             view_properties_aspect = ViewPropertiesClass(
                 materialized=False, viewLanguage="SQL", viewLogic=view_definition_string
             )
@@ -1079,7 +1038,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 logger.debug("Source does not support generating profile candidates.")
 
         for table in self.api.get_tables(schema):
-            dataset_name = self.get_identifier(table=table)
+            dataset_name = self.get_identifier(table=table.id(schema))
             if not self.is_dataset_eligible_for_profiling(
                 dataset_name, sql_config, profile_candidates
             ):
@@ -1101,11 +1060,11 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 continue
 
             (partition, custom_sql) = self.generate_partition_profiler_query(
-                schema, table, self.config.profiling.partition_datetime
+                schema.schema_name, table.name, self.config.profiling.partition_datetime
             )
 
             if partition is None and self.is_table_partitioned(
-                database=None, schema=schema, table=table
+                database=None, schema=schema.schema_name, table=table.name
             ):
                 self.warn(
                     logger,
@@ -1130,19 +1089,12 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             yield GEProfilerRequest(
                 pretty_name=dataset_name,
                 batch_kwargs=self.prepare_profiler_args(
-                    schema=schema,
-                    table=table,
+                    schema=schema.schema_name,
+                    table=table.name,
                     partition=partition,
                     custom_sql=custom_sql,
                 ),
             )
-
-    def add_profile_metadata(self, inspector: Inspector) -> None:
-        """
-        Method to add profile metadata in a sub-class that can be used to enrich profile metadata.
-        This is meant to change self.profile_metadata_info in the sub-class.
-        """
-        pass
 
     def loop_profiler(
         self,

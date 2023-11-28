@@ -146,9 +146,9 @@ class ClickHouseConfig(
     )
     include_materialized_views: Optional[bool] = Field(default=True, description="")
 
-    def get_sql_alchemy_url(self, current_db=None):
+    def get_sql_alchemy_url(self, database=None):
         url = make_url(
-            super().get_sql_alchemy_url(uri_opts=self.uri_opts, current_db=current_db)
+            super().get_sql_alchemy_url(uri_opts=self.uri_opts, database=database)
         )
         if url.drivername == "clickhouse+native" and url.query.get("protocol"):
             logger.debug(f"driver = {url.drivername}, query = {url.query}")
@@ -160,8 +160,8 @@ class ClickHouseConfig(
         # Why we need to update database in uri at all?
         # Because we get database from sqlalchemy inspector and inspector we form from url inherited from
         # TwoTierSQLAlchemySource and SQLAlchemySource
-        if self.sqlalchemy_uri and current_db:
-            url = url.set(database=current_db)
+        if self.sqlalchemy_uri and database:
+            url = url.set(database=database)
 
         return str(url)
 

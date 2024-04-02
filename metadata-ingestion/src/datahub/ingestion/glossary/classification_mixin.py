@@ -4,10 +4,10 @@ from dataclasses import dataclass, field
 from functools import partial
 from math import ceil
 from typing import Callable, Dict, Iterable, List, Optional, Union
-
+from datahub.utilities.urns.field_paths import get_simple_json_path_from_v2_field_path
 from datahub_classify.helper_classes import ColumnInfo, Metadata
 from pydantic import Field
-
+from jsonpath_ng import jsonpath, parse
 from datahub.configuration.common import ConfigModel, ConfigurationError
 from datahub.emitter.mce_builder import get_sys_time, make_term_urn, make_user_urn
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
@@ -22,7 +22,11 @@ from datahub.metadata.com.linkedin.pegasus2avro.common import (
     GlossaryTerms,
 )
 from datahub.metadata.com.linkedin.pegasus2avro.mxe import MetadataChangeEvent
-from datahub.metadata.com.linkedin.pegasus2avro.schema import SchemaMetadata
+from datahub.metadata.com.linkedin.pegasus2avro.schema import (
+    SchemaMetadata,
+    SchemaFieldDataTypeClass,
+    ArrayTypeClass,
+)
 from datahub.utilities.lossy_collections import LossyDict, LossyList
 from datahub.utilities.perf_timer import PerfTimer
 
@@ -257,12 +261,6 @@ class ClassificationHandler:
                 )
                 continue
 
-            # As a result of custom field path specification e.g. [version=2.0].[type=struct].[type=struct].service'
-            # Sample values for a nested field (an array , union or struct) are not read / passed in classifier correctly.
-            # TODO: Fix this behavior for nested fields. This would probably involve:
-            # 1. Preprocessing field path spec v2 back to native field representation. (without [*] constructs)
-            # 2. Preprocessing retrieved structured sample data to pass in sample values correctly for nested fields.
-
             column_infos.append(
                 ColumnInfo(
                     metadata=Metadata(
@@ -273,15 +271,42 @@ class ClassificationHandler:
                             "Dataset_Name": dataset_name,
                         }
                     ),
-                    values=(
-                        sample_data[schema_field.fieldPath]
-                        if schema_field.fieldPath in sample_data.keys()
-                        else []
+                    values=get_column_sample_data(
+                        sample_data, schema_field.fieldPath, schema_field.type
                     ),
                 )
             )
 
         return column_infos
+
+
+def get_column_sample_data(
+    sample_data: Dict[str, list],
+    field_path: str,
+    field_type: SchemaFieldDataTypeClass = None,
+) -> list:
+
+    # As a result of custom field path specification e.g. [version=2.0].[type=struct].[type=struct].service'
+    # Sample values for a nested field (an array , union or struct) are not read / passed in classifier correctly.
+
+    json_path = get_simple_json_path_from_v2_field_path(field_path)
+    if isinstance(field_type.type, ArrayTypeClass) and not json_path.endswith("[]"):
+        json_path += "[]"
+    if json_path in sample_data:
+        return sample_data[json_path]
+
+    try:
+        # TODO: skip populating sample values for complex fields
+        # if the inner fields are already to be processed
+
+        # If current field is single array at parent level, explode it
+        if "." not in json_path and "[]" in json_path:
+            json_path += "[*]"
+        json_path = json_path.replace("[]", "[*]").replace(".", "[*].", 1)
+
+        return [match.value for match in parse(json_path).find(sample_data)]
+    except Exception:
+        return []
 
 
 def classification_workunit_processor(

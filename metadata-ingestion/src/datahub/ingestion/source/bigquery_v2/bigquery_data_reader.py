@@ -53,7 +53,7 @@ class BigQueryDataReader(DataReader):
         )
         with PerfTimer() as timer:
             sample_pc = sample_size_percent * 100
-            # TODO: handle for sharded+compulsory partitioned tables
+            # TODO: handle for compulsory partitioned tables
             sql = (
                 f"SELECT * FROM `{project}.{dataset}.{table_name}` "
                 + f"TABLESAMPLE SYSTEM ({sample_pc:.8f} percent)"

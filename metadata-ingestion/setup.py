@@ -104,6 +104,7 @@ sqlglot_lib = {
 
 classification_lib = {
     "acryl-datahub-classify==0.0.10",
+    "jsonpath-ng"
 }
 
 sql_common = (

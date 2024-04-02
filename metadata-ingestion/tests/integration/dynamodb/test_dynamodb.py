@@ -14,11 +14,11 @@ from datahub.ingestion.glossary.datahub_classifier import (
 )
 from datahub.ingestion.run.pipeline import Pipeline
 from tests.test_helpers import mce_helpers
-
+import logging
 test_resources_dir = pathlib.Path(__file__).parent
 FROZEN_TIME = "2023-08-30 12:00:00"
 
-
+logging.getLogger("botocore").setLevel(logging.WARNING)
 @freeze_time(FROZEN_TIME)
 @mock_dynamodb
 @pytest.mark.integration
@@ -104,16 +104,7 @@ def test_dynamodb(pytestconfig, tmp_path):
                                 type="datahub",
                                 config=DataHubClassifierConfig(
                                     minimum_values_threshold=1,
-                                    info_types_config={
-                                        "Phone_Number": InfoTypeConfig(
-                                            prediction_factors_and_weights=PredictionFactorsAndWeights(
-                                                name=0.7,
-                                                description=0,
-                                                datatype=0,
-                                                values=0.3,
-                                            )
-                                        )
-                                    },
+                                    
                                 ),
                             )
                         ],
